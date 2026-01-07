@@ -53,6 +53,9 @@ const __dirname = dirname(__filename);
 
 const MemoryStore = store(session);
 
+// Stats file path
+const STATS_FILE = join(__dirname, 'data', 'stats.json');
+
 const app = express();
 const PORT = process.env.PORT || 3010;
 
@@ -60,6 +63,7 @@ const PORT = process.env.PORT || 3010;
 const FOUNT_BASE_URL = process.env.FOUNT_BASE_URL || 'https://dev.fount.allyabase.com/';
 const BDO_BASE_URL = process.env.BDO_BASE_URL || 'https://dev.bdo.allyabase.com';
 const ADDIE_BASE_URL = process.env.ADDIE_BASE_URL || 'https://dev.addie.allyabase.com';
+const ENABLE_APP_PURCHASE = process.env.ENABLE_APP_PURCHASE === 'true';
 
 // Configure SDKs
 fountLib.baseURL = FOUNT_BASE_URL.endsWith('/') ? FOUNT_BASE_URL : `${FOUNT_BASE_URL}/`;
@@ -75,7 +79,55 @@ console.log(`📍 Port: ${PORT}`);
 console.log(`📍 Fount URL: ${fountLib.baseURL}`);
 console.log(`📍 BDO URL: ${bdoLib.baseURL}`);
 console.log(`📍 Addie URL: ${ADDIE_BASE_URL}`);
+console.log(`📍 App Purchase: ${ENABLE_APP_PURCHASE ? 'Enabled' : 'Disabled'}`);
 console.log('📍 Architecture: Server returns identifiers only (clients construct URLs)');
+
+// Configuration endpoint - allows dynamic base URL configuration
+app.post('/config', express.json(), (req, res) => {
+    try {
+        const { fountURL, bdoURL, addieURL } = req.body;
+
+        if (fountURL) {
+            fountLib.baseURL = fountURL.endsWith('/') ? fountURL : `${fountURL}/`;
+            console.log(`🔧 Fount URL updated: ${fountLib.baseURL}`);
+        }
+
+        if (bdoURL) {
+            bdoLib.baseURL = bdoURL.endsWith('/') ? bdoURL : `${bdoURL}/`;
+            configureBdoLib(bdoLib);
+            console.log(`🔧 BDO URL updated: ${bdoLib.baseURL}`);
+        }
+
+        if (addieURL) {
+            addieLib.baseURL = addieURL.endsWith('/') ? addieURL : `${addieURL}/`;
+            console.log(`🔧 Addie URL updated: ${addieLib.baseURL}`);
+        }
+
+        res.json({
+            success: true,
+            config: {
+                fountURL: fountLib.baseURL,
+                bdoURL: bdoLib.baseURL,
+                addieURL: addieLib.baseURL
+            }
+        });
+    } catch (error) {
+        console.error('❌ Configuration error:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// Get current configuration
+app.get('/config', (req, res) => {
+    res.json({
+        fountURL: fountLib.baseURL,
+        bdoURL: bdoLib.baseURL,
+        addieURL: addieLib.baseURL
+    });
+});
 
 // Session middleware - gives users persistent sessions
 app.use(session({
@@ -96,6 +148,78 @@ app.use(session({
 app.use(express.static(join(__dirname, 'public')));
 app.use(express.json());
 app.use(relevantBDOsMiddleware); // Extract relevantBDOs from requests and store in session
+
+// ========== STATS TRACKING ==========
+
+/**
+ * Load stats from disk
+ */
+async function loadStats() {
+    try {
+        const fs = await import('fs/promises');
+
+        // Ensure data directory exists
+        const dataDir = join(__dirname, 'data');
+        try {
+            await fs.access(dataDir);
+        } catch {
+            await fs.mkdir(dataDir, { recursive: true });
+        }
+
+        // Try to read stats file
+        try {
+            const data = await fs.readFile(STATS_FILE, 'utf-8');
+            return JSON.parse(data);
+        } catch {
+            // File doesn't exist, return default stats
+            return {
+                totalSales: 0,
+                createdAt: new Date().toISOString(),
+                lastUpdated: new Date().toISOString()
+            };
+        }
+    } catch (error) {
+        console.error('❌ Error loading stats:', error);
+        return {
+            totalSales: 0,
+            createdAt: new Date().toISOString(),
+            lastUpdated: new Date().toISOString()
+        };
+    }
+}
+
+/**
+ * Save stats to disk
+ */
+async function saveStats(stats) {
+    try {
+        const fs = await import('fs/promises');
+        const writeFileAtomic = (await import('write-file-atomic')).default;
+
+        stats.lastUpdated = new Date().toISOString();
+
+        await writeFileAtomic(STATS_FILE, JSON.stringify(stats, null, 2));
+        console.log(`📊 Stats saved: ${stats.totalSales} total sales`);
+    } catch (error) {
+        console.error('❌ Error saving stats:', error);
+    }
+}
+
+/**
+ * Increment total sales counter
+ */
+async function incrementSales() {
+    try {
+        const stats = await loadStats();
+        stats.totalSales += 1;
+        await saveStats(stats);
+        console.log(`🎉 Sale #${stats.totalSales} recorded!`);
+        return stats.totalSales;
+    } catch (error) {
+        console.error('❌ Error incrementing sales:', error);
+        return null;
+    }
+}
 
 /**
  * View linkitylink by emojicode
@@ -1237,7 +1361,20 @@ async function addTapestryToUser(req, tapestryData) {
  */
 app.get('/create', async (req, res) => {
     const fs = await import('fs/promises');
-    const createPage = await fs.readFile(join(__dirname, 'public', 'create.html'), 'utf-8');
+    let createPage = await fs.readFile(join(__dirname, 'public', 'create.html'), 'utf-8');
+
+    // Inject app purchase configuration
+    const configScript = `
+        <script>
+            window.LINKITYLINK_CONFIG = {
+                enableAppPurchase: ${ENABLE_APP_PURCHASE}
+            };
+        </script>
+    `;
+
+    // Insert config script before closing </head> tag
+    createPage = createPage.replace('</head>', `${configScript}</head>`);
+
     res.send(createPage);
 });
 
@@ -1344,6 +1481,9 @@ app.post('/create', async (req, res) => {
             createdAt: new Date().toISOString()
         });
 
+        // Increment sales counter
+        await incrementSales();
+
         // Return identifiers only - let client construct URLs
         res.json({
             success: true,
@@ -1357,6 +1497,29 @@ app.post('/create', async (req, res) => {
         console.error('❌ Error creating Linkitylink:', error);
         res.status(500).json({
             error: error.message
+        });
+    }
+});
+
+/**
+ * GET /stats - Get server statistics
+ *
+ * Returns total sales and other stats
+ */
+app.get('/stats', async (req, res) => {
+    try {
+        const stats = await loadStats();
+        res.json({
+            success: true,
+            totalSales: stats.totalSales,
+            createdAt: stats.createdAt,
+            lastUpdated: stats.lastUpdated
+        });
+    } catch (error) {
+        console.error('❌ Error loading stats:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to load statistics'
         });
     }
 });

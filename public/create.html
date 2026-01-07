@@ -59,7 +59,7 @@
                         <span class="price">$20</span>
                         <span class="action">Buy Now</span>
                     </button>
-                    <button class="buy-button app-purchase" onclick="handleAppPurchase()">
+                    <button class="buy-button app-purchase" id="app-purchase-button" onclick="handleAppPurchase()">
                         <span class="glow"></span>
                         <span class="price">$15</span>
                         <span class="discount-badge">25% OFF</span>
@@ -1453,6 +1453,14 @@
             renderCarousel();
             renderLinkList();
             updatePreview();
+
+            // Hide app purchase button if disabled
+            if (window.LINKITYLINK_CONFIG && !window.LINKITYLINK_CONFIG.enableAppPurchase) {
+                const appButton = document.getElementById('app-purchase-button');
+                if (appButton) {
+                    appButton.style.display = 'none';
+                }
+            }
         }
         initialize();
     </script>

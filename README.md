@@ -83,6 +83,7 @@ BDO_BASE_URL=http://localhost:3003           # BDO storage service
 FOUNT_BASE_URL=http://localhost:3001         # User data service (optional)
 ADDIE_BASE_URL=http://localhost:3009         # Payment service (optional)
 NODE_ENV=development                          # Environment mode
+ENABLE_APP_PURCHASE=false                     # Show "Buy in App" button (default: false)
 ```
 
 ## API Endpoints

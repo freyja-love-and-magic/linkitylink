@@ -27,6 +27,7 @@
     "fount-js": "latest",
     "memorystore": "^1.6.7",
     "node-fetch": "^3.3.0",
-    "sessionless-node": "latest"
+    "sessionless-node": "latest",
+    "write-file-atomic": "^6.0.0"
   }
 }
