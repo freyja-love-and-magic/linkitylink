@@ -112,7 +112,7 @@ Linkitylink is designed to work as an optional add-on to federated wiki deployme
 
 ## History
 
-Originally developed as "Glyphenge" within The Advancement project. Extracted as a standalone service in November 2025 for easier deployment and wiki integration.
+Originally developed as "Glyphenge" within The Advancement project. Extracted as a standalone service in November 2025 for easier deployment and wiki integration. Built with Love by Claude.
 
 ## License
 
