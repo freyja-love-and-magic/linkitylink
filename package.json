@@ -1,12 +1,12 @@
 {
-  "name": "@planetnine/linkitylink",
-  "version": "1.0.0",
-  "description": "Linkitylink - Privacy-first link page service (formerly Glyphenge)",
-  "main": "server.js",
+  "name": "linkitylink",
+  "version": "0.0.1",
+  "description": "Linkitylink - Privacy-first link page service",
+  "main": "linkitylink.js",
   "type": "module",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js"
+    "start": "node linkitylink.js",
+    "dev": "node linkitylink.js"
   },
   "keywords": [
     "planet-nine",
