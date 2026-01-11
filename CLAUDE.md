@@ -76,6 +76,30 @@ NODE_ENV=development
 
 Linkitylink is designed to be an optional add-on to federated wiki deployments. It provides link aggregation pages for wiki users without requiring the full Planet Nine ecosystem.
 
+### Fedwiki Plugin: wiki-plugin-linkitylink
+
+The [wiki-plugin-linkitylink](../third-party/wiki-plugin-linkitylink) package demonstrates the **Service-Bundling Plugin Pattern** for fedwiki. This pattern allows a standalone Node.js service (like linkitylink) to be seamlessly integrated into fedwiki as an npm-installable plugin.
+
+**Key Features:**
+- **Automatic Service Spawning**: Plugin spawns linkitylink as a child process when wiki starts
+- **Transparent Proxying**: Routes `/plugin/linkitylink/*` to the running service
+- **Version Management UI**: Traffic light indicator (◉) shows update status, one-click updates
+- **Zero Configuration**: Works out of the box with sensible defaults
+
+**For Implementation Details:**
+See [wiki-plugin-linkitylink/CLAUDE.md](../third-party/wiki-plugin-linkitylink/CLAUDE.md) for the complete Service-Bundling Plugin Pattern documentation. This pattern is reusable for any fedwiki plugin that needs to integrate an external service.
+
+**Installation:**
+```bash
+# Via plugmatic (recommended)
+# Add "linkitylink" to a plugmatic item in your wiki
+
+# Or via npm
+npm install wiki-plugin-linkitylink
+```
+
+Once installed, linkitylink becomes available at `https://your-wiki.com/plugin/linkitylink/` with no additional configuration required.
+
 ## Development
 
 ### Dependencies

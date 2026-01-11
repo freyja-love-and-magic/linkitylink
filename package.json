@@ -1,6 +1,6 @@
 {
   "name": "linkitylink",
-  "version": "0.0.2",
+  "version": "0.0.4",
   "description": "Linkitylink - Privacy-first link page service",
   "main": "linkitylink.js",
   "type": "module",

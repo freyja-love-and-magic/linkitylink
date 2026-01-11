@@ -1,5 +1,9 @@
 # Linkitylink
 
+> **🎉 This is the code for wiki-based federated distribution of software apps.**
+>
+> Linkitylink serves as the reference implementation for distributable applications via Federated Wiki, demonstrating how standalone services can be packaged, installed, updated, and forked through wiki infrastructure.
+
 A privacy-first link page service. Create beautiful, shareable link pages without tracking or surveillance.
 
 ## Overview
@@ -106,9 +110,51 @@ docker-compose -f docker-compose.standalone.yml up -d --build
 curl http://localhost:3010
 ```
 
-## Wiki Integration
+## Wiki Integration - Federated App Distribution
 
-Linkitylink is designed to work as an optional add-on to federated wiki deployments, providing link aggregation pages without requiring the full Planet Nine ecosystem.
+Linkitylink demonstrates **wiki-based federated distribution of software applications** through the [wiki-plugin-linkitylink](../third-party/wiki-plugin-linkitylink) package.
+
+### What This Means
+
+Traditional software distribution requires:
+- ❌ Centralized app stores
+- ❌ Manual installation and configuration
+- ❌ Command-line expertise for updates
+- ❌ Separate hosting for each app instance
+
+**Wiki-based federated distribution enables:**
+- ✅ **Peer-to-peer app distribution** - Apps spread through wiki federation
+- ✅ **One-click installation** - Install via wiki's built-in plugin manager (plugmatic)
+- ✅ **Automatic updates** - Traffic light UI shows update status, one-click to upgrade
+- ✅ **True forking** - Fork a wiki page, get an independent app instance
+- ✅ **Zero configuration** - Apps configure themselves from wiki context
+- ✅ **Decentralized hosting** - Each wiki runs its own app instances
+
+### How It Works
+
+1. **Package as npm module** - Linkitylink published to npm registry
+2. **Create fedwiki plugin** - [wiki-plugin-linkitylink](../third-party/wiki-plugin-linkitylink) bundles linkitylink as dependency
+3. **Automatic spawning** - Plugin spawns linkitylink as child process when wiki starts
+4. **Transparent proxying** - `/plugin/linkitylink/*` routes to the running service
+5. **Version management** - Built-in UI for checking and updating linkitylink version
+6. **Fork propagation** - When users fork wiki pages, they get independent linkitylink instances
+
+### Installation via Fedwiki
+
+```bash
+# Users install via plugmatic (fedwiki's plugin manager)
+# 1. Add "linkitylink" to a plugmatic item in your wiki
+# 2. Click the status indicator to install
+# 3. Done! Linkitylink runs at https://your-wiki.com/plugin/linkitylink/
+```
+
+No separate hosting, no configuration files, no manual service management.
+
+### For Developers
+
+See the [Service-Bundling Plugin Pattern](../third-party/wiki-plugin-linkitylink/CLAUDE.md) documentation for a complete guide to packaging your own applications for federated wiki distribution.
+
+This pattern is reusable for **any** standalone service or application you want to distribute through fedwiki infrastructure.
 
 ## History
 
