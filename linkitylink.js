@@ -65,6 +65,22 @@ const BDO_BASE_URL = process.env.BDO_BASE_URL || 'https://dev.bdo.allyabase.com'
 const ADDIE_BASE_URL = process.env.ADDIE_BASE_URL || 'https://dev.addie.allyabase.com';
 const ENABLE_APP_PURCHASE = process.env.ENABLE_APP_PURCHASE === 'true';
 
+// Base path for proxied environments (e.g., '/plugin/linkitylink' when served through fedwiki)
+const BASE_PATH = process.env.BASE_PATH || '';
+
+/**
+ * Inject <base> tag into HTML for proper asset loading when proxied
+ * @param {string} html - HTML content
+ * @returns {string} - HTML with injected base tag
+ */
+function injectBasePath(html) {
+  if (!BASE_PATH) return html;
+
+  // Inject <base href="/plugin/linkitylink/"> into <head>
+  const baseTag = `<base href="${BASE_PATH}/">`;
+  return html.replace('<head>', `<head>\n    ${baseTag}`);
+}
+
 // Configure SDKs
 fountLib.baseURL = FOUNT_BASE_URL.endsWith('/') ? FOUNT_BASE_URL : `${FOUNT_BASE_URL}/`;
 bdoLib.baseURL = BDO_BASE_URL.endsWith('/') ? BDO_BASE_URL : `${BDO_BASE_URL}/`;
@@ -300,7 +316,7 @@ app.get('/', async (req, res) => {
         if (!emojicode && !pubKey && !timestamp && !signature) {
             const fs = await import('fs/promises');
             const landingPage = await fs.readFile(join(__dirname, 'public', 'index.html'), 'utf-8');
-            return res.send(landingPage);
+            return res.send(injectBasePath(landingPage));
         }
 
         let links = [];
@@ -1362,6 +1378,9 @@ async function addTapestryToUser(req, tapestryData) {
 app.get('/create', async (req, res) => {
     const fs = await import('fs/promises');
     let createPage = await fs.readFile(join(__dirname, 'public', 'create.html'), 'utf-8');
+
+    // Inject base path for proper asset loading when proxied
+    createPage = injectBasePath(createPage);
 
     // Inject app purchase configuration
     const configScript = `
