@@ -57,7 +57,7 @@ const MemoryStore = store(session);
 const STATS_FILE = join(__dirname, 'data', 'stats.json');
 
 const app = express();
-const PORT = process.env.PORT || 3010;
+const PORT = process.env.PORT || 6010;
 
 // Configuration (defaults to dev environment)
 const FOUNT_BASE_URL = process.env.FOUNT_BASE_URL || 'https://dev.fount.allyabase.com/';
@@ -684,194 +684,272 @@ function generateLinkitylinkPage(links, userName, authenticated, pubKey) {
     const linkCount = links.length;
     const svgTemplate = chooseSVGTemplate(linkCount);
 
+    // Generate the SVG content
+    const svgContent = svgTemplate(links);
+
+    // Calculate height for the full page SVG (includes header, links, CTA, footer)
+    const regularLinks = links.filter(link => !link.isSocial);
+    const socialLinks = links.filter(link => link.isSocial);
+    const baseLinkHeight = regularLinks.length * 110 + 60;
+    const somaHeight = socialLinks.length > 0 ? 100 : 0;
+    const linksHeight = Math.max(400, baseLinkHeight + somaHeight);
+    const headerHeight = 200;
+    const ctaHeight = authenticated ? 0 : 350;
+    const footerHeight = 100;
+    const totalHeight = headerHeight + linksHeight + ctaHeight + footerHeight;
+
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${userName} - Linkitylink</title>
+    <title>${escapeXML(userName)} - Linkitylink</title>
+
+    <!-- Stripe.js for payments (if needed) -->
+    ${ENABLE_APP_PURCHASE ? '<script src="https://js.stripe.com/v3/"></script>' : ''}
+
     <style>
+        /* Minimal reset - no visual styling, just layout */
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
-
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            width: 100%;
             min-height: 100vh;
-            padding: 40px 20px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
+            overflow-x: hidden;
+            background: #0a001a; /* Fallback background */
         }
-
-        .header {
-            text-align: center;
-            margin-bottom: 40px;
-        }
-
-        .header h1 {
-            color: white;
-            font-size: 2.5rem;
-            margin-bottom: 10px;
-            text-shadow: 0 2px 10px rgba(0,0,0,0.2);
-        }
-
-        .header .badge {
-            display: inline-block;
-            background: rgba(255,255,255,0.2);
-            color: white;
-            padding: 5px 15px;
-            border-radius: 20px;
-            font-size: 0.9rem;
-            margin-top: 10px;
-        }
-
-        .links-container {
-            max-width: 600px;
-            width: 100%;
-            margin-bottom: 40px;
-        }
-
-        .link-card {
-            background: white;
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 15px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-            transition: transform 0.2s, box-shadow 0.2s;
-            cursor: pointer;
-            text-decoration: none;
+        #linkitylink-svg {
             display: block;
-        }
-
-        .link-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 30px rgba(0,0,0,0.15);
-        }
-
-        .link-card .title {
-            font-size: 1.2rem;
-            font-weight: 600;
-            color: #333;
-            margin-bottom: 5px;
-        }
-
-        .link-card .url {
-            font-size: 0.9rem;
-            color: #666;
-            word-break: break-all;
-        }
-
-        .svg-container {
-            max-width: 800px;
             width: 100%;
-            margin-bottom: 40px;
-            background: white;
-            border-radius: 20px;
-            padding: 30px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            height: auto;
+            min-height: 100vh;
         }
-
-        .cta-container {
-            text-align: center;
-            background: rgba(255,255,255,0.1);
-            border-radius: 20px;
-            padding: 40px;
-            max-width: 600px;
-            width: 100%;
-            backdrop-filter: blur(10px);
-        }
-
-        .cta-container h2 {
-            color: white;
-            margin-bottom: 20px;
-            font-size: 1.8rem;
-        }
-
-        .cta-container p {
-            color: rgba(255,255,255,0.9);
-            margin-bottom: 25px;
-            font-size: 1.1rem;
-            line-height: 1.6;
-        }
-
-        .cta-button {
-            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-            color: white;
-            padding: 15px 40px;
-            border-radius: 30px;
-            text-decoration: none;
-            font-weight: 600;
-            font-size: 1.1rem;
-            display: inline-block;
-            transition: transform 0.2s, box-shadow 0.2s;
-            box-shadow: 0 4px 20px rgba(16, 185, 129, 0.3);
-        }
-
+        /* Make SVG groups hoverable */
         .cta-button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 30px rgba(16, 185, 129, 0.4);
-        }
-
-        .footer {
-            margin-top: 40px;
-            text-align: center;
-            color: rgba(255,255,255,0.7);
-            font-size: 0.9rem;
+            cursor: pointer;
         }
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1>${userName}</h1>
-        ${authenticated ? '<div class="badge">🔐 Authenticated</div>' : '<div class="badge">👁️ Demo Mode</div>'}
-    </div>
+    <!-- Full UI rendered as SVG -->
+    <svg id="linkitylink-svg" xmlns="http://www.w3.org/2000/svg"
+         width="700" height="${totalHeight}" viewBox="0 0 700 ${totalHeight}">
 
-    <div class="svg-container">
-        ${svgTemplate(links)}
-    </div>
+        <!-- Background gradient -->
+        <defs>
+            <radialGradient id="page-bg" cx="50%" cy="50%">
+                <stop offset="0%" style="stop-color:#1a0033;stop-opacity:1" />
+                <stop offset="100%" style="stop-color:#0a001a;stop-opacity:1" />
+            </radialGradient>
 
-    <div class="cta-container">
-        <h2>✨ Weave Your Own Linkitylink</h2>
-        <p>Cast the Linkitylink enchantment to create your mystical link tapestry. Visit The Enchantment Emporium in The Advancement app.</p>
-        <a href="#purchase" class="cta-button" onclick="handlePurchase()">
-            Visit The Enchantment Emporium
-        </a>
-        <p style="font-size: 0.9rem; margin-top: 20px; opacity: 0.8;">
-            ✨ Privacy-first • 🔐 Cryptographically secure • 🎨 Mystically beautiful
-        </p>
-    </div>
+            <!-- Glow effects for CTA button -->
+            <filter id="cta-glow" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="8" result="coloredBlur"/>
+                <feMerge>
+                    <feMergeNode in="coloredBlur"/>
+                    <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+            </filter>
+        </defs>
 
-    <div class="footer">
-        <p>Woven by <strong>Planet Nine</strong></p>
-        <p style="margin-top: 5px;">The Enchantment Emporium • Linkitylink Tapestries</p>
-    </div>
+        <!-- Full page background -->
+        <rect width="700" height="${totalHeight}" fill="url(#page-bg)"/>
 
+        <!-- Header Section -->
+        <g id="header" transform="translate(0, 40)">
+            <!-- User name -->
+            <text x="350" y="60"
+                  font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+                  font-size="42"
+                  font-weight="bold"
+                  fill="#ffffff"
+                  text-anchor="middle"
+                  style="filter: drop-shadow(0 2px 10px rgba(0,0,0,0.3));">
+                ${escapeXML(userName)}
+            </text>
+
+            <!-- Badge -->
+            <g transform="translate(250, 85)">
+                <rect width="200" height="35" rx="17.5" fill="rgba(255,255,255,0.2)"/>
+                <text x="100" y="23"
+                      font-family="-apple-system, sans-serif"
+                      font-size="14"
+                      fill="#ffffff"
+                      text-anchor="middle">
+                    ${authenticated ? '🔐 Authenticated' : '👁️ Demo Mode'}
+                </text>
+            </g>
+        </g>
+
+        <!-- Links Section (embedded SVG from template) -->
+        <g id="links-section" transform="translate(0, ${headerHeight})">
+            ${svgContent.replace(/<svg[^>]*>|<\/svg>/g, '')}
+        </g>
+
+        <!-- CTA Section (if not authenticated) -->
+        ${!authenticated ? `
+        <g id="cta-section" transform="translate(100, ${headerHeight + linksHeight + 40})">
+            <!-- CTA Container with glassmorphism effect -->
+            <rect width="500" height="280" rx="20"
+                  fill="rgba(255,255,255,0.05)"
+                  stroke="rgba(167, 139, 250, 0.3)"
+                  stroke-width="1"/>
+
+            <!-- Heading -->
+            <text x="250" y="60"
+                  font-family="-apple-system, sans-serif"
+                  font-size="26"
+                  font-weight="bold"
+                  fill="#ffffff"
+                  text-anchor="middle">
+                ✨ Weave Your Own Linkitylink
+            </text>
+
+            <!-- Description line 1 -->
+            <text x="250" y="100"
+                  font-family="-apple-system, sans-serif"
+                  font-size="15"
+                  fill="rgba(255,255,255,0.9)"
+                  text-anchor="middle">
+                Cast the Linkitylink enchantment to create
+            </text>
+
+            <!-- Description line 2 -->
+            <text x="250" y="125"
+                  font-family="-apple-system, sans-serif"
+                  font-size="15"
+                  fill="rgba(255,255,255,0.9)"
+                  text-anchor="middle">
+                your mystical link tapestry
+            </text>
+
+            <!-- CTA Button -->
+            <g class="cta-button" id="cta-button" transform="translate(125, 160)">
+                <defs>
+                    <linearGradient id="cta-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" style="stop-color:#10b981;stop-opacity:1" />
+                        <stop offset="100%" style="stop-color:#059669;stop-opacity:1" />
+                    </linearGradient>
+                </defs>
+                <rect width="250" height="55" rx="27.5"
+                      fill="url(#cta-gradient)"
+                      filter="url(#cta-glow)"
+                      style="cursor: pointer;"/>
+                <text x="125" y="36"
+                      font-family="-apple-system, sans-serif"
+                      font-size="17"
+                      font-weight="600"
+                      fill="#ffffff"
+                      text-anchor="middle"
+                      pointer-events="none">
+                    Visit The Enchantment Emporium
+                </text>
+            </g>
+
+            <!-- Feature tags -->
+            <text x="250" y="245"
+                  font-family="-apple-system, sans-serif"
+                  font-size="13"
+                  fill="rgba(255,255,255,0.7)"
+                  text-anchor="middle">
+                ✨ Privacy-first • 🔐 Cryptographically secure • 🎨 Mystically beautiful
+            </text>
+        </g>
+        ` : ''}
+
+        <!-- Footer Section -->
+        <g id="footer" transform="translate(0, ${headerHeight + linksHeight + ctaHeight + 20})">
+            <text x="350" y="30"
+                  font-family="-apple-system, sans-serif"
+                  font-size="14"
+                  fill="rgba(255,255,255,0.7)"
+                  text-anchor="middle">
+                Woven by <tspan font-weight="bold">Planet Nine</tspan>
+            </text>
+            <text x="350" y="55"
+                  font-family="-apple-system, sans-serif"
+                  font-size="13"
+                  fill="rgba(255,255,255,0.6)"
+                  text-anchor="middle">
+                The Enchantment Emporium • Linkitylink Tapestries
+            </text>
+        </g>
+    </svg>
+
+    <!-- JavaScript for interactivity -->
     <script>
-        function handlePurchase() {
-            // TODO: Implement Enchantment Emporium integration
-            alert('Visit The Enchantment Emporium in The Advancement app to cast the Linkitylink enchantment!');
-            console.log('Redirecting to Enchantment Emporium');
+        console.log('Linkitylink page loaded');
 
-            // Future implementation:
-            // 1. Deep link to The Advancement app
-            // 2. Open Enchantment Emporium
-            // 3. Show Linkitylink enchantment
-            // 4. Guide user through enchantment casting
+        // CTA Button click handling
+        const ctaButton = document.getElementById('cta-button');
+        if (ctaButton) {
+            ctaButton.addEventListener('click', async function(e) {
+                e.preventDefault();
+                console.log('CTA button clicked');
+
+                ${ENABLE_APP_PURCHASE ? `
+                    // Payment flow with Stripe
+                    try {
+                        console.log('Creating payment intent...');
+                        const response = await fetch('${BASE_PATH}/create-payment-intent', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                amount: 499, // $4.99
+                                metadata: { type: 'linkitylink_purchase' }
+                            })
+                        });
+
+                        if (!response.ok) {
+                            throw new Error('Failed to create payment intent');
+                        }
+
+                        const { clientSecret } = await response.json();
+                        console.log('Payment intent created, redirecting to Stripe...');
+
+                        // Initialize Stripe
+                        const stripe = Stripe('${process.env.STRIPE_PUBLISHABLE_KEY || ''}');
+
+                        // Redirect to Stripe checkout
+                        const { error } = await stripe.confirmPayment({
+                            clientSecret,
+                            confirmParams: {
+                                return_url: window.location.origin + '${BASE_PATH}/create'
+                            }
+                        });
+
+                        if (error) {
+                            console.error('Payment error:', error);
+                            alert('Payment failed: ' + error.message);
+                        }
+                    } catch (err) {
+                        console.error('Payment error:', err);
+                        alert('Payment failed. Please try again.');
+                    }
+                ` : `
+                    // Free version - navigate to create page or show info
+                    alert('Visit The Enchantment Emporium in The Advancement app to cast the Linkitylink enchantment!');
+                    console.log('Redirecting to create page...');
+                    // Uncomment to enable redirect:
+                    // window.location.href = '${BASE_PATH}/create';
+                `}
+            });
+
+            // Add hover effect
+            ctaButton.addEventListener('mouseenter', function() {
+                this.style.opacity = '0.9';
+            });
+            ctaButton.addEventListener('mouseleave', function() {
+                this.style.opacity = '1';
+            });
         }
 
-        // Make links clickable
-        document.querySelectorAll('.link-card').forEach(card => {
-            card.addEventListener('click', function(e) {
-                const url = this.dataset.url;
-                if (url) {
-                    window.open(url, '_blank');
-                }
-            });
-        });
+        // Note: Links in the SVG already have <a> tags with href and target="_blank"
+        // so they work natively without JavaScript
+        console.log('All interactive elements initialized');
     </script>
 </body>
 </html>`;

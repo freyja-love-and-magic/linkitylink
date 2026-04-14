@@ -2,11 +2,15 @@
 
 A privacy-first link page service (formerly Glyphenge). Create beautiful, shareable link pages without tracking or surveillance.
 
+**Part of**: [The Advancement](../third-party/wiki-plugin-linkitylink/THE-ADVANCEMENT.md) - Rebuilding known platforms for communities
+
 ## Overview
 
 Linkitylink creates beautiful SVG-based link pages from user-provided links. Users can share their pages via human-memorable emojicodes or browser-friendly alphanumeric URLs.
 
-**Port**: 3010 (default)
+**Replaces**: Linktree, Beacons, Link-in-bio services
+**Cost**: $4.99 one-time (vs $10+/month)
+**Port**: 6010 (default, wiki plugin servers use 6000 range)
 
 ## Architecture
 
@@ -24,7 +28,7 @@ npm install
 npm start
 ```
 
-Server runs on `http://localhost:3010`
+Server runs on `http://localhost:6010`
 
 ## API Endpoints
 
@@ -65,7 +69,7 @@ GET /t/02a1b2c3d4e5f6a7
 ## Environment Variables
 
 ```bash
-PORT=3010
+PORT=6010
 BDO_BASE_URL=http://localhost:3003
 FOUNT_BASE_URL=http://localhost:3001
 ADDIE_BASE_URL=http://localhost:3009

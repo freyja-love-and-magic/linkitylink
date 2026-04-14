@@ -25,14 +25,14 @@ npm install
 npm start
 ```
 
-Server runs on `http://localhost:3010`
+Server runs on `http://localhost:6010`
 
 ## Usage
 
 ### Create a Link Page
 
 ```bash
-curl -X POST http://localhost:3010/create \
+curl -X POST http://localhost:6010/create \
   -H "Content-Type: application/json" \
   -d '{
     "title": "My Links",
@@ -57,12 +57,12 @@ Response:
 
 Via emojicode (persistent):
 ```
-http://localhost:3010?emojicode=🔗💎🌟🎨🐉📌🌍🔑
+http://localhost:6010?emojicode=🔗💎🌟🎨🐉📌🌍🔑
 ```
 
 Via alphanumeric URL (browser-friendly):
 ```
-http://localhost:3010/t/02a1b2c3d4e5f6a7
+http://localhost:6010/t/02a1b2c3d4e5f6a7
 ```
 
 ## SVG Templates
@@ -82,7 +82,7 @@ All templates feature:
 ## Environment Variables
 
 ```bash
-PORT=3010                                    # Server port
+PORT=6010                                    # Server port
 BDO_BASE_URL=http://localhost:3003           # BDO storage service
 FOUNT_BASE_URL=http://localhost:3001         # User data service (optional)
 ADDIE_BASE_URL=http://localhost:3009         # Payment service (optional)
@@ -107,7 +107,7 @@ ENABLE_APP_PURCHASE=false                     # Show "Buy in App" button (defaul
 docker-compose -f docker-compose.standalone.yml up -d --build
 
 # Verify running
-curl http://localhost:3010
+curl http://localhost:6010
 ```
 
 ## Wiki Integration - Federated App Distribution
