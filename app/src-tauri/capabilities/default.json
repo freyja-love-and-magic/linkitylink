@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "default",
+  "description": "Default capabilities for Linkitylink",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "share-sheet:allow-share-text",
+    "dialog:allow-open",
+    "fs:allow-read-file"
+  ]
+}
