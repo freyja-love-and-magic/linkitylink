@@ -1846,6 +1846,7 @@ dependencies = [
  "sessionless",
  "tauri",
  "tauri-build",
+ "tauri-plugin-app-group",
  "tauri-plugin-dialog",
  "tauri-plugin-fs",
  "tauri-plugin-share-sheet",
@@ -3611,6 +3612,15 @@ dependencies = [
  "serde_json",
  "tauri-utils",
  "walkdir",
+]
+
+[[package]]
+name = "tauri-plugin-app-group"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "tauri",
+ "tauri-plugin",
 ]
 
 [[package]]

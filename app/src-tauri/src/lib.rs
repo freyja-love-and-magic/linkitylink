@@ -724,19 +724,204 @@ async fn import_links(url: String) -> Result<Vec<LinkEntry>, String> {
     Ok(entries)
 }
 
+// ── App Group sharing ───────────────────────────────────────────────────────
+
+#[tauri::command]
+async fn share_card_to_app_group(app: tauri::AppHandle) -> Result<(), String> {
+    let card = read_card(&app).ok_or_else(|| "No card to share yet".to_string())?;
+    let json = serde_json::to_string(&card).map_err(|e| e.to_string())?;
+    tauri_plugin_app_group::write_value_sync(&app, "linkitylink.card", &json)
+}
+
+/// Permissive mirror of BizBuz's `Profile`/`Social` — every field
+/// optional/defaulted so a version skew between the two apps (one ahead of
+/// the other on a given phone) never breaks deserialization here.
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct BizbuzSocialMirror {
+    github: Option<String>,
+    codeberg: Option<String>,
+    linkedin: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct BizbuzProfileMirror {
+    name: Option<String>,
+    title: Option<String>,
+    company: Option<String>,
+    email: Option<String>,
+    phone: Option<String>,
+    website: Option<String>,
+    location: Option<String>,
+    bio: Option<String>,
+    social: BizbuzSocialMirror,
+    photo: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportFromBizbuzResult {
+    pub name: Option<String>,
+    pub bio: Option<String>,
+    pub photo: Option<String>,
+    pub links: Vec<LinkEntry>,
+    pub skipped_fields: Vec<String>,
+}
+
+#[tauri::command]
+async fn import_from_bizbuz(app: tauri::AppHandle) -> Result<ImportFromBizbuzResult, String> {
+    let raw = tauri_plugin_app_group::read_value_sync(&app, "bizbuz.profile")?.ok_or_else(|| {
+        "BizBuz hasn't shared anything yet — open BizBuz and tap \u{201c}Share to App Group\u{201d} first.".to_string()
+    })?;
+    let profile: BizbuzProfileMirror =
+        serde_json::from_str(&raw).map_err(|e| format!("Couldn't read BizBuz's shared profile: {e}"))?;
+
+    let mut links = Vec::new();
+    if let Some(site) = profile.website.filter(|s| !s.is_empty()) {
+        links.push(LinkEntry { id: String::new(), label: "Website".into(), url: site });
+    }
+    if let Some(gh) = profile.social.github.filter(|s| !s.is_empty()) {
+        links.push(LinkEntry {
+            id: String::new(),
+            label: "GitHub".into(),
+            url: format!("https://github.com/{gh}"),
+        });
+    }
+    if let Some(cb) = profile.social.codeberg.filter(|s| !s.is_empty()) {
+        links.push(LinkEntry {
+            id: String::new(),
+            label: "Codeberg".into(),
+            url: format!("https://codeberg.org/{cb}"),
+        });
+    }
+    if let Some(li) = profile.social.linkedin.filter(|s| !s.is_empty()) {
+        links.push(LinkEntry {
+            id: String::new(),
+            label: "LinkedIn".into(),
+            url: format!("https://linkedin.com/in/{li}"),
+        });
+    }
+
+    let mut skipped = Vec::new();
+    for (label, val) in [
+        ("title", &profile.title),
+        ("company", &profile.company),
+        ("email", &profile.email),
+        ("phone", &profile.phone),
+        ("location", &profile.location),
+    ] {
+        if val.as_deref().is_some_and(|s| !s.is_empty()) {
+            skipped.push(label.to_string());
+        }
+    }
+
+    Ok(ImportFromBizbuzResult {
+        name: profile.name,
+        bio: profile.bio,
+        photo: profile.photo,
+        links,
+        skipped_fields: skipped,
+    })
+}
+
+// ── Canonical profile ───────────────────────────────────────────────────────
+//
+// A third, independent record — separate from this app's own LinkCard —
+// holding "all of the user's information" in one place, shared verbatim
+// across every app in group.freyja.idothis via the App Group plugin. Not
+// wired into save_card/publish_card in any way; editing it never touches
+// link_card.json.
+
+// Higher than MAX_LINKS(10) since this now covers every profile field, not
+// just links.
+const MAX_PROFILE_FIELDS: usize = 20;
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CanonicalField {
+    pub slug: String,
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CanonicalProfile {
+    pub photo: Option<String>,
+    #[serde(default)]
+    pub fields: Vec<CanonicalField>,
+    pub updated_at: Option<String>,
+}
+
+fn slugify(s: &str) -> String {
+    let mut slug = String::new();
+    let mut last_was_sep = true; // drop leading separators
+    for ch in s.trim().chars() {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch.to_ascii_lowercase());
+            last_was_sep = false;
+        } else if !last_was_sep {
+            slug.push('_');
+            last_was_sep = true;
+        }
+    }
+    while slug.ends_with('_') {
+        slug.pop();
+    }
+    slug
+}
+
+#[tauri::command]
+async fn load_canonical_profile(app: tauri::AppHandle) -> Result<Option<CanonicalProfile>, String> {
+    let raw = tauri_plugin_app_group::read_value_sync(&app, "canonical.profile")?;
+    match raw {
+        // A decode failure (e.g. leftover data from an earlier schema) is
+        // treated as "nothing saved yet" rather than a hard error.
+        Some(json) => Ok(serde_json::from_str(&json).ok()),
+        None => Ok(None),
+    }
+}
+
+#[tauri::command]
+async fn save_canonical_profile(app: tauri::AppHandle, mut profile: CanonicalProfile) -> Result<CanonicalProfile, String> {
+    let mut deduped: Vec<CanonicalField> = Vec::new();
+    for mut field in profile.fields.into_iter() {
+        if field.slug.trim().is_empty() {
+            field.slug = slugify(&field.name);
+        }
+        if field.slug.is_empty() {
+            continue;
+        }
+        deduped.retain(|f| f.slug != field.slug);
+        deduped.push(field);
+    }
+    deduped.truncate(MAX_PROFILE_FIELDS);
+    profile.fields = deduped;
+    profile.updated_at = Some(unix_now_ms_string());
+    let json = serde_json::to_string(&profile).map_err(|e| e.to_string())?;
+    tauri_plugin_app_group::write_value_sync(&app, "canonical.profile", &json)?;
+    Ok(profile)
+}
+
 // ── App entry ────────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_share_sheet::init())
+        .plugin(tauri_plugin_app_group::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
             load_card,
             save_card,
             publish_card,
-            import_links
+            import_links,
+            share_card_to_app_group,
+            import_from_bizbuz,
+            load_canonical_profile,
+            save_canonical_profile
         ])
         .run(tauri::generate_context!())
         .expect("error while running linkitylink");

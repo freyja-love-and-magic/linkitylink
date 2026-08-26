@@ -53,6 +53,16 @@ console.log('\n==> Patching iOS project...');
 const projectYmlPath = path.join(genApple, 'project.yml');
 let projectYml = fs.readFileSync(projectYmlPath, 'utf8');
 
+// ── 3a0. ios-native/ — carries PrivacyInfo.xcprivacy (App Group UserDefaults
+// usage declaration) into the app target's sources.
+if (!projectYml.includes('../../ios-native')) {
+  projectYml = projectYml.replace(
+    '      - path: LaunchScreen.storyboard\n',
+    '      - path: LaunchScreen.storyboard\n      - path: ../../ios-native\n'
+  );
+  console.log('    Added ios-native source path (carries PrivacyInfo.xcprivacy)');
+}
+
 // ── 3a. Restrict to iPhone — the app's UI is a fixed phone-sized window
 // (see tauri.conf.json), so building universal (the XcodeGen default) would
 // just stretch that layout across an iPad without ever having been designed
@@ -102,6 +112,37 @@ const iconDest = path.join(genApple, 'Assets.xcassets', 'AppIcon.appiconset');
 const iconFiles = fs.readdirSync(iconSrc).filter((f) => f.endsWith('.png'));
 iconFiles.forEach((f) => fs.copyFileSync(path.join(iconSrc, f), path.join(iconDest, f)));
 console.log(`    Restored ${iconFiles.length} real app icons -> gen/apple/Assets.xcassets/AppIcon.appiconset/`);
+
+// `tauri icon` always writes every size as RGBA, even from a fully opaque
+// source — App Store Connect rejects an alpha channel on the 1024x1024
+// marketing icon ("Invalid large app icon... can't be transparent or
+// contain an alpha channel"). Flattening every copied icon here (not just
+// the 1024 one) keeps the whole set consistent and survives a future
+// `tauri icon` regeneration, since this runs on every build, not just once.
+iconFiles.forEach((f) => {
+  const p = path.join(iconDest, f);
+  spawnSync('magick', [p, '-background', '#0a001a', '-alpha', 'remove', '-alpha', 'off', p]);
+});
+console.log('    Flattened alpha channel out of all app icons (App Store rejects it on the 1024x1024 marketing icon)');
+
+// ── 3d. Patch App Group entitlements — `tauri ios init` (step 2) regenerates
+// this as an empty <dict/> every build, same problem as the app icon above.
+// project.yml already points CODE_SIGN_ENTITLEMENTS at this file
+// automatically (XcodeGen's `entitlements.path` key), so only the file
+// content itself needs patching, not project.yml.
+const entitlementsPath = path.join(genApple, 'linkitylink_iOS', 'linkitylink_iOS.entitlements');
+fs.writeFileSync(entitlementsPath, `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>group.freyja.idothis</string>
+    </array>
+</dict>
+</plist>
+`);
+console.log('    Patched App Group entitlements (group.freyja.idothis)');
 
 // ── 4. Build IPA ───────────────────────────────────────────────────────────────
 console.log('\n==> Building Linkitylink IPA...');

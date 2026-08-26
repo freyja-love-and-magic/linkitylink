@@ -37,6 +37,7 @@ targets:
         buildPhase: resources
         type: folder
       - path: LaunchScreen.storyboard
+      - path: ../../ios-native
     info:
       path: linkitylink_iOS/Info.plist
       properties:

@@ -29,7 +29,7 @@ body {
        the content itself is what needs to clear the safe areas. */
     padding: calc(24px + env(safe-area-inset-top))
              calc(20px + env(safe-area-inset-right))
-             calc(40px + env(safe-area-inset-bottom))
+             calc(90px + env(safe-area-inset-bottom))
              calc(20px + env(safe-area-inset-left));
 }
 
@@ -317,6 +317,24 @@ textarea {
 .hint {
     font-size: 12px;
     color: var(--white-70);
+}
+
+/* ── Canonical profile nav button ────────────────────────────────────────── */
+
+.profile-nav-btn {
+    position: fixed;
+    bottom: calc(20px + env(safe-area-inset-bottom));
+    right: calc(20px + env(safe-area-inset-right));
+    background: var(--white-10);
+    border: 1px solid var(--white-10);
+    color: white;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 12px 22px;
+    border-radius: 14px;
+    cursor: pointer;
+    z-index: 100;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
 }
 
 .status-msg {

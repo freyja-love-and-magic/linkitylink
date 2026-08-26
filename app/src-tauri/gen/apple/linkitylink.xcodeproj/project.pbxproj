@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		146CD08208EB9B7B4B4612D5 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 22ACDD15677A51B204317035 /* PrivacyInfo.xcprivacy */; };
 		1BBC9DF5F2F96A6EC8591FAD /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1E705579A6B51ABB8C2615DF /* Assets.xcassets */; };
 		20792B5488721EBB9D163744 /* main.mm in Sources */ = {isa = PBXBuildFile; fileRef = 3095AE8431F69E72D3401516 /* main.mm */; };
 		26D608E3F6FD29CB5BBE4938 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7CB8EF20D48B4B860FB40F1A /* CoreGraphics.framework */; };
@@ -24,6 +25,7 @@
 /* Begin PBXFileReference section */
 		10B994F021F8970CE472621D /* lib.rs */ = {isa = PBXFileReference; path = lib.rs; sourceTree = "<group>"; };
 		1E705579A6B51ABB8C2615DF /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		22ACDD15677A51B204317035 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		2C33AE3E14D913A52D266776 /* bindings.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bindings.h; sourceTree = "<group>"; };
 		3095AE8431F69E72D3401516 /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
 		416CB96E5D3402C36F806B88 /* linkitylink_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = linkitylink_iOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -67,6 +69,7 @@
 				1E705579A6B51ABB8C2615DF /* Assets.xcassets */,
 				BA5BB85E4318564B6062D435 /* LaunchScreen.storyboard */,
 				574DB9554D7C97E305A5DC9E /* Externals */,
+				BA15D96A98A008585744F47F /* ios-native */,
 				E8C62210435BB3AA24868727 /* linkitylink_iOS */,
 				9D08A0FBEDF286E430C51DB9 /* Sources */,
 				6475F6F3AADF837650640BA0 /* src */,
@@ -114,6 +117,15 @@
 				5A348381FF32554229DC7D64 /* linkitylink */,
 			);
 			path = Sources;
+			sourceTree = "<group>";
+		};
+		BA15D96A98A008585744F47F /* ios-native */ = {
+			isa = PBXGroup;
+			children = (
+				22ACDD15677A51B204317035 /* PrivacyInfo.xcprivacy */,
+			);
+			name = "ios-native";
+			path = "../../ios-native";
 			sourceTree = "<group>";
 		};
 		CD950A8DB349F29CF94D9E80 /* Frameworks */ = {
@@ -211,6 +223,7 @@
 			files = (
 				1BBC9DF5F2F96A6EC8591FAD /* Assets.xcassets in Resources */,
 				8C4D21CE57402F286EAA8A2D /* LaunchScreen.storyboard in Resources */,
+				146CD08208EB9B7B4B4612D5 /* PrivacyInfo.xcprivacy in Resources */,
 				D40856F581A45E548E8EE8E5 /* assets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
