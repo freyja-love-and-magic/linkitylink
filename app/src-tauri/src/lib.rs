@@ -10,17 +10,77 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::Manager;
 
-const GATEWAY_BDO_URL: &str = "https://allyabase-gateway.netlify.app/bdo/";
-const SAVAGE_URL: &str = "https://allyabase-gateway.netlify.app/savage/";
+const GATEWAY_BDO_URL: &str = "https://allyabase-gateway-12345.netlify.app/bdo/";
+const SAVAGE_URL: &str = "https://allyabase-gateway-12345.netlify.app/savage/";
 const BDO_HASH: &str = "linkitylink-card";
-// One card, ever, per install — a fixed key into bdo_keys.json rather than a
-// per-card id (mirrors how bizbuz keys its own "invite a friend" referral
-// link, the only other place it needs a single non-multi-card identity).
-const BDO_IDENTITY_KEY: &str = "link-card";
-const MAX_LINKS: usize = 10;
+const MAX_CARDS: usize = 4;
+
+// BDO mints its own server-side uuid on create_user, distinct from the local
+// keypair — a uuid minted against one gateway 404s an update_bdo call on
+// another, so both a card's publish record and the referral link are stored
+// per-env (keyed by this const) rather than as a single value. Bump this
+// whenever GATEWAY_BDO_URL points at a genuinely different BDO deployment.
+const GATEWAY_ENV: &str = "test-12345";
+const MAX_LINKS: usize = 16;
 // Bounds a pathological generic-fallback page's raw scrape output; the real
 // user-facing cap is MAX_LINKS, enforced at merge time in the JS import handler.
 const IMPORT_SCRAPE_CAP: usize = 40;
+
+// ── Categories ───────────────────────────────────────────────────────────────
+//
+// Same slug/label list as idothis's own CATEGORIES (and bizbuz's copy) —
+// kept as its own copy here rather than a shared crate, matching this
+// ecosystem's existing per-app-copy convention. Keep in sync by hand if
+// either list changes.
+
+const CATEGORIES: &[(&str, &str)] = &[
+    ("plumber", "Plumber"),
+    ("electrician", "Electrician"),
+    ("house_cleaner", "House Cleaner"),
+    ("caterer", "Caterer"),
+    ("restauranteur", "Restauranteur"),
+    ("chef", "Chef"),
+    ("food_cart", "Food Cart"),
+    ("handyman", "Handyman"),
+    ("landscaper", "Landscaper"),
+    ("painter", "Painter"),
+    ("carpenter", "Carpenter"),
+    ("hvac_technician", "HVAC Technician"),
+    ("photographer", "Photographer"),
+    ("videographer", "Videographer"),
+    ("hair_stylist", "Hair Stylist"),
+    ("barber", "Barber"),
+    ("massage_therapist", "Massage Therapist"),
+    ("personal_trainer", "Personal Trainer"),
+    ("tutor", "Tutor"),
+    ("pet_groomer", "Pet Groomer"),
+    ("dog_walker", "Dog Walker"),
+    ("auto_mechanic", "Auto Mechanic"),
+    ("mover", "Moving Services"),
+    ("interior_designer", "Interior Designer"),
+    ("web_developer", "Web Developer"),
+    ("graphic_designer", "Graphic Designer"),
+    ("accountant", "Accountant"),
+    ("event_planner", "Event Planner"),
+    ("dj_musician", "DJ / Musician"),
+    ("baker", "Baker"),
+    ("florist", "Florist"),
+    ("tailor", "Tailor / Seamstress"),
+];
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Category {
+    pub slug: String,
+    pub label: String,
+}
+
+#[tauri::command]
+async fn get_categories() -> Result<Vec<Category>, String> {
+    Ok(CATEGORIES
+        .iter()
+        .map(|(slug, label)| Category { slug: slug.to_string(), label: label.to_string() })
+        .collect())
+}
 
 // ── Data types ───────────────────────────────────────────────────────────────
 
@@ -37,6 +97,8 @@ pub struct LinkEntry {
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct LinkCard {
+    #[serde(default)]
+    pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -46,8 +108,16 @@ pub struct LinkCard {
     pub photo: Option<String>,
     #[serde(default)]
     pub links: Vec<LinkEntry>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub bdo_uuid: Option<String>,
+    /// Coarse business-type tag, e.g. `"food"` for Food & Drink. Deliberately
+    /// narrow for now (see wiring to the letemcook cross-promo prompt in the
+    /// frontend) — `#[serde(default)]` so cards saved before this field
+    /// existed still deserialize.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// BDO identity uuid this card is published under, per environment
+    /// (see `GATEWAY_ENV`) — a fresh env has no entry until first publish.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub bdo_uuid_by_env: HashMap<String, String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub share_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -56,26 +126,56 @@ pub struct LinkCard {
 
 // ── Storage ──────────────────────────────────────────────────────────────────
 
+#[derive(Debug, Serialize, Deserialize, Default)]
+struct CardsStore {
+    cards: Vec<LinkCard>,
+}
+
 fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
 }
 
-fn card_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+fn cards_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(data_dir(app)?.join("cards.json"))
+}
+
+/// Pre-multi-card storage location — a single `LinkCard` written directly as
+/// JSON (no wrapping `cards` array). Migrated into cards.json on first load
+/// if a user already had one card from before this feature existed.
+fn legacy_card_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(data_dir(app)?.join("link_card.json"))
 }
 
-fn read_card(app: &tauri::AppHandle) -> Option<LinkCard> {
-    let path = card_path(app).ok()?;
-    let contents = fs::read_to_string(path).ok()?;
-    serde_json::from_str(&contents).ok()
+fn write_cards(app: &tauri::AppHandle, store: &CardsStore) -> Result<(), String> {
+    let path = cards_path(app)?;
+    let json = serde_json::to_string_pretty(store).map_err(|e| e.to_string())?;
+    fs::write(path, json).map_err(|e| e.to_string())
 }
 
-fn write_card(app: &tauri::AppHandle, card: &LinkCard) -> Result<(), String> {
-    let path = card_path(app)?;
-    let json = serde_json::to_string_pretty(card).map_err(|e| e.to_string())?;
-    fs::write(path, json).map_err(|e| e.to_string())
+fn read_cards(app: &tauri::AppHandle) -> Result<CardsStore, String> {
+    let path = cards_path(app)?;
+    match fs::read_to_string(&path) {
+        Ok(contents) => serde_json::from_str(&contents).map_err(|e| e.to_string()),
+        Err(_) => {
+            // Nothing at cards.json yet — check for a pre-multi-card
+            // link_card.json and migrate it in as this user's first card.
+            match fs::read_to_string(legacy_card_path(app)?) {
+                Ok(contents) => {
+                    let mut card: LinkCard =
+                        serde_json::from_str(&contents).map_err(|e| e.to_string())?;
+                    if card.id.is_empty() {
+                        card.id = new_id();
+                    }
+                    let store = CardsStore { cards: vec![card] };
+                    write_cards(app, &store)?;
+                    Ok(store)
+                }
+                Err(_) => Ok(CardsStore::default()),
+            }
+        }
+    }
 }
 
 static ID_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -102,9 +202,10 @@ fn unix_now_ms_string() -> String {
 // ── BDO publishing ───────────────────────────────────────────────────────────
 //
 // BDO's public storage is keyed by pubKey — one identity, one publicly
-// retrievable slot. Since there's only ever one link card per install, it
-// gets one fixed-key identity (BDO_IDENTITY_KEY), generated once and reused
-// forever, rather than the per-entity keying bizbuz needs for its cards.
+// retrievable slot, overwritten on every public write regardless of the
+// `hash` used. So each card that gets published needs its own sessionless
+// keypair, not one shared device identity — same pattern bizbuz uses for
+// its own multi-card support.
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct BdoKeypair {
@@ -139,8 +240,8 @@ fn sessionless_from_hex(priv_key_hex: &str) -> Result<Sessionless, String> {
     Ok(Sessionless::from_private_key(secret_key))
 }
 
-/// Returns the link card's BDO identity, generating and persisting a fresh
-/// keypair the first time this is ever called.
+/// Returns a card's BDO identity, generating and persisting a fresh keypair
+/// the first time a given card is published.
 fn load_or_create_bdo_sessionless(app: &tauri::AppHandle, key: &str) -> Result<Sessionless, String> {
     let mut keys = read_bdo_keys(app);
     if let Some(existing) = keys.get(key) {
@@ -495,6 +596,48 @@ fn render_card_svg(card: &LinkCard) -> String {
 
 // ── Link import ──────────────────────────────────────────────────────────────
 
+// Linktree's own human label for a socialLinks[].type value (e.g. "X",
+// "TIKTOK") — covers every type actually observed in the wild; unrecognized
+// future types fall back to a title-cased rendering of the raw type string
+// (parse_social_type below) rather than being dropped.
+fn social_type_label(social_type: &str) -> Option<&'static str> {
+    Some(match social_type {
+        "INSTAGRAM" => "Instagram",
+        "TIKTOK" => "TikTok",
+        "FACEBOOK" => "Facebook",
+        "YOUTUBE" => "YouTube",
+        "X" | "TWITTER" => "X",
+        "SNAPCHAT" => "Snapchat",
+        "THREADS" => "Threads",
+        "PINTEREST" => "Pinterest",
+        "TWITCH" => "Twitch",
+        "SPOTIFY" => "Spotify",
+        "SOUNDCLOUD" => "SoundCloud",
+        "LINKEDIN" => "LinkedIn",
+        "DISCORD" => "Discord",
+        "TELEGRAM" => "Telegram",
+        "WHATSAPP" => "WhatsApp",
+        "EMAIL" => "Email",
+        "WEBSITE" => "Website",
+        _ => return None,
+    })
+}
+
+fn title_case_social_type(social_type: &str) -> String {
+    social_type
+        .split('_')
+        .filter(|w| !w.is_empty())
+        .map(|w| {
+            let mut chars = w.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + &chars.as_str().to_lowercase(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn parse_linktree(html: &str) -> Vec<LinkEntry> {
     // Locate the opening tag by its id, then advance past its closing `>` —
     // not a fixed literal tag string, since Linktree's other attributes on
@@ -511,7 +654,8 @@ fn parse_linktree(html: &str) -> Vec<LinkEntry> {
     // Targets the exact path — deliberately NOT a generic JSON walk, so the
     // unrelated statsigInitValues sponsor-offers array (same {title,url}
     // shape, sibling path) is never visited.
-    data.pointer("/props/pageProps/links")
+    let main_links = data
+        .pointer("/props/pageProps/links")
         .and_then(|v| v.as_array())
         .cloned()
         .unwrap_or_default()
@@ -528,8 +672,30 @@ fn parse_linktree(html: &str) -> Vec<LinkEntry> {
                 .trim()
                 .to_string();
             Some(LinkEntry { id: String::new(), label, url })
-        })
-        .collect()
+        });
+
+    // The row of icon-only social buttons (Instagram, TikTok, etc.) is a
+    // SEPARATE array from the main link list above — easy to miss since a
+    // profile with only socials configured looks link-less otherwise.
+    let social_links = data
+        .pointer("/props/pageProps/socialLinks")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|s| {
+            let url = s.get("url")?.as_str()?.trim().to_string();
+            if url.is_empty() {
+                return None;
+            }
+            let social_type = s.get("type").and_then(|t| t.as_str()).unwrap_or("");
+            let label = social_type_label(social_type)
+                .map(|l| l.to_string())
+                .unwrap_or_else(|| title_case_social_type(social_type));
+            Some(LinkEntry { id: String::new(), label, url })
+        });
+
+    main_links.chain(social_links).collect()
 }
 
 fn is_hidden(el: &dom_query::Selection) -> bool {
@@ -605,43 +771,72 @@ fn dedupe_and_cap(entries: Vec<LinkEntry>, cap: usize) -> Vec<LinkEntry> {
 // ── Commands ─────────────────────────────────────────────────────────────────
 
 #[tauri::command]
-async fn load_card(app: tauri::AppHandle) -> Result<Option<LinkCard>, String> {
-    Ok(read_card(&app))
+async fn load_cards(app: tauri::AppHandle) -> Result<Vec<LinkCard>, String> {
+    Ok(read_cards(&app)?.cards)
 }
 
-/// Overwrites the single link card. `id`s on new/edited link entries with no
-/// id are assigned here so the frontend never has to invent its own scheme.
+/// Upserts a card by id. Assigns a fresh id if the card doesn't have one yet
+/// (a new card). Rejects new cards once MAX_CARDS is reached. `id`s on
+/// new/edited link entries with no id are assigned here so the frontend
+/// never has to invent its own scheme.
 #[tauri::command]
 async fn save_card(app: tauri::AppHandle, mut card: LinkCard) -> Result<LinkCard, String> {
+    let mut store = read_cards(&app)?;
+    let is_new = card.id.is_empty() || !store.cards.iter().any(|c| c.id == card.id);
+
+    if is_new {
+        if store.cards.len() >= MAX_CARDS {
+            return Err(format!("You can only keep up to {} cards.", MAX_CARDS));
+        }
+        if card.id.is_empty() {
+            card.id = new_id();
+        }
+    }
+
     card.links.truncate(MAX_LINKS);
     for entry in card.links.iter_mut() {
         if entry.id.is_empty() {
             entry.id = new_id();
         }
     }
-    write_card(&app, &card)?;
+
+    store.cards.retain(|c| c.id != card.id);
+    store.cards.push(card.clone());
+    write_cards(&app, &store)?;
     Ok(card)
 }
 
-/// Publishes (or re-publishes, pushing edits) the link card to BDO,
-/// embedding a rendered SVG so savage can serve it as a live shareable
-/// webpage. The link is available the instant this returns — the savage URL
-/// is a locally computed signature, not a server-assigned code to wait on.
 #[tauri::command]
-async fn publish_card(app: tauri::AppHandle) -> Result<LinkCard, String> {
-    let mut card = read_card(&app).ok_or_else(|| "No card to publish yet".to_string())?;
+async fn delete_card(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let mut store = read_cards(&app)?;
+    store.cards.retain(|c| c.id != id);
+    write_cards(&app, &store)
+}
 
-    let sessionless = load_or_create_bdo_sessionless(&app, BDO_IDENTITY_KEY)?;
+/// Publishes (or re-publishes, pushing edits) a card to BDO, embedding a
+/// rendered SVG so savage can serve it as a live shareable webpage. The link
+/// is available the instant this returns — the savage URL is a locally
+/// computed signature, not a server-assigned code to wait on.
+#[tauri::command]
+async fn publish_card(app: tauri::AppHandle, card_id: String) -> Result<LinkCard, String> {
+    let mut store = read_cards(&app)?;
+    let index = store
+        .cards
+        .iter()
+        .position(|c| c.id == card_id)
+        .ok_or_else(|| "Card not found".to_string())?;
+
+    let sessionless = load_or_create_bdo_sessionless(&app, &card_id)?;
     let client = BDO::new(Some(GATEWAY_BDO_URL.to_string()), Some(sessionless));
 
-    let svg = render_card_svg(&card);
-    let mut card_json = serde_json::to_value(&card).map_err(|e| e.to_string())?;
+    let svg = render_card_svg(&store.cards[index]);
+    let mut card_json = serde_json::to_value(&store.cards[index]).map_err(|e| e.to_string())?;
     card_json
         .as_object_mut()
         .ok_or_else(|| "card serialized to non-object".to_string())?
         .insert("svg".to_string(), serde_json::Value::String(svg));
 
-    let existing_uuid = card.bdo_uuid.clone();
+    let existing_uuid = store.cards[index].bdo_uuid_by_env.get(GATEWAY_ENV).cloned();
 
     let uuid = if let Some(uuid) = existing_uuid {
         client
@@ -666,11 +861,131 @@ async fn publish_card(app: tauri::AppHandle) -> Result<LinkCard, String> {
         "{SAVAGE_URL}user/{uuid}/bdo?timestamp={timestamp}&hash={BDO_HASH}&signature={signature}"
     );
 
-    card.bdo_uuid = Some(uuid);
-    card.share_url = Some(share_url);
-    card.published_at = Some(unix_now_ms_string());
-    write_card(&app, &card)?;
-    Ok(card)
+    store.cards[index].bdo_uuid_by_env.insert(GATEWAY_ENV.to_string(), uuid);
+    store.cards[index].share_url = Some(share_url);
+    store.cards[index].published_at = Some(unix_now_ms_string());
+    let updated = store.cards[index].clone();
+    write_cards(&app, &store)?;
+    Ok(updated)
+}
+
+// ── Referral link ────────────────────────────────────────────────────────────
+//
+// Hosted exactly like a card: an SVG published on its own BDO, wrapped as a
+// live webpage by savage. One referral identity per app install (not per
+// card), reusing the same per-key BDO identity mechanism as cards
+// (`load_or_create_bdo_sessionless`) under the fixed key "referral" rather
+// than a card id. Mirrors BizBuz's own referral-link feature exactly.
+//
+// savage's sanitizer strips <script>/javascript:/data: content from the svg,
+// so an automatic redirect to the App Store can't survive being embedded in
+// the svg — instead the svg just has a plain "Get Linkitylink" button, a
+// real <a href> to the App Store.
+
+const REFERRAL_HASH: &str = "linkitylink-referral";
+// TODO: replace with the real App Store listing URL once Linkitylink has one.
+const APP_STORE_URL: &str = "https://apps.apple.com/app/id0000000000";
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ReferralLink {
+    uuid: String,
+    share_url: String,
+}
+
+fn referral_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(data_dir(app)?.join("referral.json"))
+}
+
+// Keyed by GATEWAY_ENV — same reasoning as LinkCard.bdo_uuid_by_env above, a
+// referral link published on one gateway doesn't exist on another.
+fn read_referral_links(app: &tauri::AppHandle) -> HashMap<String, ReferralLink> {
+    let path = match referral_path(app) {
+        Ok(p) => p,
+        Err(_) => return HashMap::new(),
+    };
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn write_referral_links(app: &tauri::AppHandle, links: &HashMap<String, ReferralLink>) -> Result<(), String> {
+    let path = referral_path(app)?;
+    let json = serde_json::to_string_pretty(links).map_err(|e| e.to_string())?;
+    fs::write(path, json).map_err(|e| e.to_string())
+}
+
+/// Renders the referral SVG: two interlocking link ovals (echoing the app's
+/// own "linked pages" idea), a tagline, and a "Get Linkitylink" button
+/// linking to the App Store.
+fn render_referral_svg(app_store_url: &str) -> String {
+    const WIDTH: u32 = 400;
+    const HEIGHT: u32 = 440;
+    const BG: &str = "#0a001a";
+    const GREEN: &str = "#10b981";
+    const PURPLE: &str = "#a78bfa";
+
+    let cx = WIDTH / 2;
+    let button_y: u32 = 300;
+
+    format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{WIDTH}" height="{HEIGHT}" viewBox="0 0 {WIDTH} {HEIGHT}">
+<defs><linearGradient id="markGradient" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="{GREEN}"/><stop offset="100%" stop-color="{PURPLE}"/></linearGradient></defs>
+<rect x="0" y="0" width="{WIDTH}" height="{HEIGHT}" fill="{BG}"/>
+<rect x="{}" y="90" width="90" height="50" rx="25" fill="none" stroke="url(#markGradient)" stroke-width="10"/>
+<rect x="{}" y="115" width="90" height="50" rx="25" fill="none" stroke="url(#markGradient)" stroke-width="10"/>
+<text x="{cx}" y="210" font-family="sans-serif" font-size="30" font-weight="bold" fill="url(#markGradient)" text-anchor="middle">Linkitylink</text>
+<text x="{cx}" y="240" font-family="sans-serif" font-size="14" fill="rgba(255,255,255,0.7)" text-anchor="middle">All your links, one shareable page.</text>
+<text x="{cx}" y="270" font-family="sans-serif" font-size="14" fill="{PURPLE}" text-anchor="middle">You've been invited to try it out.</text>
+<a href="{}"><rect x="{}" y="{button_y}" width="260" height="56" rx="16" fill="{GREEN}"/><text x="{cx}" y="{}" font-family="sans-serif" font-size="18" font-weight="bold" fill="{BG}" text-anchor="middle">Get Linkitylink</text></a>
+<text x="{cx}" y="400" font-family="sans-serif" font-size="11" fill="rgba(255,255,255,0.4)" text-anchor="middle">a Freyja offering</text>
+</svg>"#,
+        cx - 110,
+        cx + 20,
+        escape_xml(app_store_url),
+        cx - 130,
+        button_y + 36,
+    )
+}
+
+/// Returns this install's referral share URL — publishing an svg to its own
+/// fresh BDO and computing the permanent savage URL the first time this is
+/// called (mirrors `publish_card` exactly), and reusing the result (from
+/// local storage) on every call after that, since the referral svg is
+/// static and never needs re-publishing.
+#[tauri::command]
+async fn get_or_create_referral_link(app: tauri::AppHandle) -> Result<String, String> {
+    let mut links = read_referral_links(&app);
+    if let Some(link) = links.get(GATEWAY_ENV) {
+        return Ok(link.share_url.clone());
+    }
+
+    let sessionless = load_or_create_bdo_sessionless(&app, "referral")?;
+    let client = BDO::new(Some(GATEWAY_BDO_URL.to_string()), Some(sessionless));
+
+    let svg = render_referral_svg(APP_STORE_URL);
+    let card_json = serde_json::json!({ "svg": svg });
+
+    let user = client
+        .create_user(REFERRAL_HASH, &card_json, &true)
+        .await
+        .map_err(|e| e.to_string())?;
+    let uuid = user.uuid;
+
+    let timestamp = unix_now_ms_string();
+    let signature = client
+        .sessionless
+        .sign(format!("{timestamp}{uuid}{REFERRAL_HASH}"))
+        .to_hex();
+    let share_url = format!(
+        "{SAVAGE_URL}user/{uuid}/bdo?timestamp={timestamp}&hash={REFERRAL_HASH}&signature={signature}"
+    );
+
+    let link = ReferralLink { uuid, share_url: share_url.clone() };
+    links.insert(GATEWAY_ENV.to_string(), link);
+    write_referral_links(&app, &links)?;
+    Ok(share_url)
 }
 
 #[tauri::command]
@@ -727,9 +1042,14 @@ async fn import_links(url: String) -> Result<Vec<LinkEntry>, String> {
 // ── App Group sharing ───────────────────────────────────────────────────────
 
 #[tauri::command]
-async fn share_card_to_app_group(app: tauri::AppHandle) -> Result<(), String> {
-    let card = read_card(&app).ok_or_else(|| "No card to share yet".to_string())?;
-    let json = serde_json::to_string(&card).map_err(|e| e.to_string())?;
+async fn share_card_to_app_group(app: tauri::AppHandle, card_id: String) -> Result<(), String> {
+    let store = read_cards(&app)?;
+    let card = store
+        .cards
+        .iter()
+        .find(|c| c.id == card_id)
+        .ok_or_else(|| "Card not found".to_string())?;
+    let json = serde_json::to_string(card).map_err(|e| e.to_string())?;
     tauri_plugin_app_group::write_value_sync(&app, "linkitylink.card", &json)
 }
 
@@ -833,7 +1153,7 @@ async fn import_from_bizbuz(app: tauri::AppHandle) -> Result<ImportFromBizbuzRes
 // wired into save_card/publish_card in any way; editing it never touches
 // link_card.json.
 
-// Higher than MAX_LINKS(10) since this now covers every profile field, not
+// Higher than MAX_LINKS(16) since this now covers every profile field, not
 // just links.
 const MAX_PROFILE_FIELDS: usize = 20;
 
@@ -845,12 +1165,30 @@ pub struct CanonicalField {
     pub value: String,
 }
 
+/// A standard postal address on the shared Canonical Profile. This app has
+/// no UI to view or edit it (Gettit does — see its lib.rs) — the field
+/// exists here purely so `save_canonical_profile` below can round-trip it
+/// without silently erasing whatever Gettit wrote, since every app that
+/// touches Canonical Profile overwrites the whole shared record on save.
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Address {
+    pub street: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+    pub city: String,
+    pub state: String,
+    pub zip: String,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct CanonicalProfile {
     pub photo: Option<String>,
     #[serde(default)]
     pub fields: Vec<CanonicalField>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address: Option<Address>,
     pub updated_at: Option<String>,
 }
 
@@ -885,6 +1223,11 @@ async fn load_canonical_profile(app: tauri::AppHandle) -> Result<Option<Canonica
 
 #[tauri::command]
 async fn save_canonical_profile(app: tauri::AppHandle, mut profile: CanonicalProfile) -> Result<CanonicalProfile, String> {
+    // This app's own form never sends a real address (no UI for it — see
+    // Address's doc comment above), so always carry forward whatever's
+    // already stored rather than overwriting it with the incoming None.
+    profile.address = load_canonical_profile(app.clone()).await?.and_then(|p| p.address);
+
     let mut deduped: Vec<CanonicalField> = Vec::new();
     for mut field in profile.fields.into_iter() {
         if field.slug.trim().is_empty() {
@@ -913,11 +1256,15 @@ pub fn run() {
         .plugin(tauri_plugin_app_group::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
-            load_card,
+            get_categories,
+            load_cards,
             save_card,
+            delete_card,
             publish_card,
             import_links,
+            get_or_create_referral_link,
             share_card_to_app_group,
             import_from_bizbuz,
             load_canonical_profile,

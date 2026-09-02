@@ -1,33 +1,54 @@
 const { core, dialog, fs } = window.__TAURI__;
 
 // Keep in sync with MAX_LINKS in src-tauri/src/lib.rs.
-const MAX_LINKS = 10;
+const MAX_LINKS = 16;
+// Keep in sync with MAX_CARDS in src-tauri/src/lib.rs.
+const MAX_CARDS = 4;
 // Cap on the canonical profile's field list — keep in sync with
 // MAX_PROFILE_FIELDS in src-tauri/src/lib.rs.
 const MAX_PROFILE_FIELDS = 20;
 
+// Populated at init from the Rust-side CATEGORIES list (get_categories) —
+// shared with idothis's/bizbuz's own taxonomy, see lib.rs. slug -> label.
+let categories = [];
+let categoryLabels = {};
+
+// Same food-related slugs idothis/bizbuz prompt on — keep in sync with
+// lib.rs's CATEGORIES if that list's food entries ever change.
+const FOOD_CATEGORY_SLUGS = ['caterer', 'restauranteur', 'chef', 'food_cart', 'baker'];
+
+// localStorage key for the set of card ids already offered the letemcook
+// cross-promo prompt, so re-saving a food card never re-nags. Prompted
+// once ever per card id, the first time a save lands with category 'food'.
+const LETEMCOOK_PROMPTED_KEY = 'linkitylink.letemcookPromptedCardIds';
+
+const cardsView = document.getElementById('cards-view');
 const editView = document.getElementById('edit-view');
 const cardView = document.getElementById('card-view');
+const cardsGrid = document.getElementById('cards-grid');
 const form = document.getElementById('card-form');
 const statusMsg = document.getElementById('status-msg');
 const photoPreview = document.getElementById('photo-preview');
 const choosePhotoBtn = document.getElementById('choose-photo-btn');
 const cancelEditBtn = document.getElementById('cancel-edit-btn');
+const deleteCardBtn = document.getElementById('delete-card-btn');
 const linkEntriesEl = document.getElementById('link-entries');
 const newLinkLabel = document.getElementById('new-link-label');
 const newLinkUrl = document.getElementById('new-link-url');
 const addLinkBtn = document.getElementById('add-link-btn');
 const linkLimitHint = document.getElementById('link-limit-hint');
+linkLimitHint.textContent = `Up to ${MAX_LINKS} links — remove one to add another.`;
 const importUrlInput = document.getElementById('import-url');
 const importLinksBtn = document.getElementById('import-links-btn');
 const importBizbuzBtn = document.getElementById('import-bizbuz-btn');
-const shareAppGroupBtn = document.getElementById('share-app-group-btn');
 const publishBtn = document.getElementById('publish-btn');
 const linkRow = document.getElementById('link-row');
 const linkText = document.getElementById('link-text');
 const copyLinkBtn = document.getElementById('copy-link-btn');
 const shareBtn = document.getElementById('share-btn');
+const referralShareBtn = document.getElementById('referral-share-btn');
 const profileNavBtn = document.getElementById('profile-nav-btn');
+const backToCardsBtn = document.getElementById('back-to-cards-btn');
 const profileView = document.getElementById('profile-view');
 const profileForm = document.getElementById('canonical-profile-form');
 const profilePhotoPreview = document.getElementById('profile-photo-preview');
@@ -43,17 +64,22 @@ const profileCloseBtn = document.getElementById('profile-close-btn');
 const PHOTO_SIZE = 480;
 const PHOTO_QUALITY = 0.85;
 
-let card = null; // the currently loaded/saved LinkCard, or null if never saved
+let cards = [];
+let activeCard = null; // the card shown in card-view / being edited in edit-view (null = creating new)
 let pendingPhoto = null; // base64 JPEG (no data: prefix), staged from the picker until Save
 let pendingLinks = []; // working link-entry array while the edit form is open
+let deleteArmed = false;
+let deleteArmedTimeout = null;
 
 // ── View / status helpers ────────────────────────────────────────────────────
 
 function showView(name) {
+    cardsView.hidden = name !== 'cards';
     editView.hidden = name !== 'edit';
     cardView.hidden = name !== 'card';
     profileView.hidden = name !== 'profile';
     profileNavBtn.hidden = name === 'profile';
+    backToCardsBtn.hidden = name !== 'card';
 }
 
 let statusTimeout = null;
@@ -327,8 +353,10 @@ importBizbuzBtn.addEventListener('click', async () => {
 
 function cardFromForm() {
     return {
+        id: activeCard?.id || '',
         name: document.getElementById('field-name').value.trim() || undefined,
         bio: document.getElementById('field-bio').value.trim() || undefined,
+        category: document.getElementById('field-category').value || undefined,
         photo: pendingPhoto || undefined,
         links: pendingLinks,
     };
@@ -337,11 +365,46 @@ function cardFromForm() {
 function fillForm(source) {
     document.getElementById('field-name').value = source?.name || '';
     document.getElementById('field-bio').value = source?.bio || '';
+    document.getElementById('field-category').value = source?.category || '';
     pendingPhoto = source?.photo || null;
     pendingLinks = (source?.links || []).map((l) => ({ ...l }));
     editingLinkIndex = null;
     setAvatarContent(photoPreview, source?.photo, source?.name || '');
     renderLinkEntries();
+}
+
+// ── Cards grid ────────────────────────────────────────────────────────────────
+
+function renderCardsGrid() {
+    cardsGrid.innerHTML = '';
+
+    for (const c of cards) {
+        const tile = document.createElement('button');
+        tile.type = 'button';
+        tile.className = 'card-tile filled';
+
+        const avatar = document.createElement('div');
+        avatar.className = 'avatar';
+        setAvatarContent(avatar, c.photo, c.name || '');
+        tile.appendChild(avatar);
+
+        const name = document.createElement('span');
+        name.className = 'card-tile-name';
+        name.textContent = c.name || 'Untitled';
+        tile.appendChild(name);
+
+        tile.addEventListener('click', () => openCard(c));
+        cardsGrid.appendChild(tile);
+    }
+
+    if (cards.length < MAX_CARDS) {
+        const addTile = document.createElement('button');
+        addTile.type = 'button';
+        addTile.className = 'card-tile empty';
+        addTile.textContent = '+';
+        addTile.addEventListener('click', openNewCardForm);
+        cardsGrid.appendChild(addTile);
+    }
 }
 
 // ── Card view ─────────────────────────────────────────────────────────────────
@@ -381,6 +444,10 @@ function renderCardView(c) {
     bioEl.textContent = c.bio ? `"${c.bio}"` : '';
     bioEl.hidden = !c.bio;
 
+    const categoryEl = document.getElementById('card-category');
+    categoryEl.textContent = categoryLabels[c.category] || '';
+    categoryEl.hidden = !c.category;
+
     const linksEl = document.getElementById('card-links');
     linksEl.innerHTML = '';
     for (const entry of c.links || []) {
@@ -408,41 +475,122 @@ function renderPublishLink(c) {
     }
 }
 
-function showCard(c) {
-    card = c;
+// Upserts a card into the in-memory `cards` list and, if it's the one
+// currently on screen, refreshes the link row too — used by both the
+// explicit Publish button and the silent background sync below.
+function applyCardUpdate(updated) {
+    cards = cards.filter((c) => c.id !== updated.id);
+    cards.push(updated);
+    if (activeCard?.id === updated.id) {
+        activeCard = updated;
+        renderPublishLink(updated);
+    }
+}
+
+// The shareable link (shareUrl, a pre-signed savage URL) is available the
+// instant publish_card returns — the signature never expires, so it's
+// computed once and doesn't need to be refreshed on later shares. Publishing
+// proactively in the background (on boot and after every edit, not only when
+// the user taps the button) keeps the published card in sync with the latest
+// edits without requiring an explicit re-publish tap first.
+async function backgroundPublishCard(cardId) {
+    try {
+        const updated = await core.invoke('publish_card', { cardId });
+        applyCardUpdate(updated);
+    } catch {
+        // Best-effort — network hiccups etc. shouldn't surface to the user
+        // for a sync they didn't explicitly ask for.
+    }
+}
+
+function backgroundPublishAllCards() {
+    for (const c of cards) backgroundPublishCard(c.id);
+}
+
+// Keeps BizBuz's "Import from Linkitylink" button in sync with whichever
+// card was most recently saved — the App Group only has room for one
+// Linkitylink card, so there's no explicit "Share to App Group" button
+// anymore, just an automatic sync on every save.
+async function backgroundShareToAppGroup(cardId) {
+    try {
+        await core.invoke('share_card_to_app_group', { cardId });
+    } catch {
+        // Best-effort — shouldn't surface to the user for a sync they
+        // didn't explicitly ask for.
+    }
+}
+
+function openCard(c) {
+    activeCard = c;
     renderCardView(c);
     renderPublishLink(c);
     showView('card');
 }
 
-function openEditForm() {
-    fillForm(card);
-    cancelEditBtn.hidden = !card;
+function openNewCardForm() {
+    activeCard = null;
+    pendingPhoto = null;
+    pendingLinks = [];
+    editingLinkIndex = null;
+    disarmDelete();
+    form.reset();
+    setAvatarContent(photoPreview, null, '');
+    renderLinkEntries();
+    cancelEditBtn.hidden = cards.length === 0;
+    deleteCardBtn.hidden = true;
     showView('edit');
 }
 
-async function loadCard() {
-    card = await core.invoke('load_card');
-    if (card) {
-        showCard(card);
+async function loadCards() {
+    cards = await core.invoke('load_cards');
+    if (cards.length === 0) {
+        openNewCardForm();
     } else {
-        openEditForm();
+        renderCardsGrid();
+        showView('cards');
     }
 }
 
-// The shareable link (a pre-signed savage URL) is available the instant
-// publish_card returns — the signature never expires, so it's computed once
-// and doesn't need to be refreshed on later shares. Publishing proactively
-// in the background after every save keeps the published card in sync with
-// the latest edits without requiring an explicit re-publish tap first.
-async function backgroundPublish() {
+function getLetemcookPromptedIds() {
     try {
-        const updated = await core.invoke('publish_card');
-        card = updated;
-        if (!cardView.hidden) renderPublishLink(updated);
+        return new Set(JSON.parse(localStorage.getItem(LETEMCOOK_PROMPTED_KEY) || '[]'));
     } catch {
-        // Best-effort — network hiccups shouldn't surface for a sync the
-        // user didn't explicitly ask for.
+        return new Set();
+    }
+}
+
+function markLetemcookPrompted(cardId) {
+    const ids = getLetemcookPromptedIds();
+    ids.add(cardId);
+    try {
+        localStorage.setItem(LETEMCOOK_PROMPTED_KEY, JSON.stringify([...ids]));
+    } catch {
+        // localStorage unavailable — worst case this prompt reappears later.
+    }
+}
+
+// Offers to cross-list a freshly-saved Food & Drink card on letemcook, a
+// sibling food-ordering app. Fires at most once ever per card id.
+async function maybePromptLetemcook(saved) {
+    if (!saved.category || !FOOD_CATEGORY_SLUGS.includes(saved.category)) return;
+    if (getLetemcookPromptedIds().has(saved.id)) return;
+    markLetemcookPrompted(saved.id);
+
+    const wantsToJoin = confirm(
+        `Also list "${saved.name || 'this business'}" on letemcook, our food-ordering app?`
+    );
+    if (!wantsToJoin) return;
+
+    const params = new URLSearchParams();
+    if (saved.name) params.set('name', saved.name);
+    if (saved.bio) params.set('bio', saved.bio);
+
+    try {
+        await core.invoke('plugin:shell|open', {
+            path: `letemcook://add-location?${params.toString()}`,
+        });
+    } catch (err) {
+        setStatus(`Couldn't open letemcook: ${err}`);
     }
 }
 
@@ -450,26 +598,78 @@ form.addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
         const saved = await core.invoke('save_card', { card: cardFromForm() });
-        showCard(saved);
-        backgroundPublish();
+        cards = cards.filter((c) => c.id !== saved.id);
+        cards.push(saved);
+        activeCard = saved;
+        renderCardsGrid();
+        renderCardView(saved);
+        renderPublishLink(saved);
+        showView('card');
+        backgroundPublishCard(saved.id);
+        backgroundShareToAppGroup(saved.id);
+        maybePromptLetemcook(saved);
     } catch (err) {
         setStatus(`Couldn't save: ${err}`);
     }
 });
 
 cancelEditBtn.addEventListener('click', () => {
-    if (card) showView('card');
+    showView(activeCard ? 'card' : 'cards');
 });
 
-document.getElementById('edit-btn').addEventListener('click', openEditForm);
+function disarmDelete() {
+    deleteArmed = false;
+    clearTimeout(deleteArmedTimeout);
+    deleteCardBtn.textContent = 'Delete Card';
+}
+
+deleteCardBtn.addEventListener('click', async () => {
+    if (!activeCard) return;
+
+    if (!deleteArmed) {
+        deleteArmed = true;
+        deleteCardBtn.textContent = 'Tap again to confirm';
+        deleteArmedTimeout = setTimeout(disarmDelete, 3000);
+        return;
+    }
+
+    disarmDelete();
+    try {
+        await core.invoke('delete_card', { id: activeCard.id });
+        cards = cards.filter((c) => c.id !== activeCard.id);
+        activeCard = null;
+        if (cards.length === 0) {
+            openNewCardForm();
+        } else {
+            renderCardsGrid();
+            showView('cards');
+        }
+    } catch (err) {
+        setStatus(`Couldn't delete: ${err}`);
+    }
+});
+
+document.getElementById('edit-btn').addEventListener('click', () => {
+    if (activeCard) fillForm(activeCard);
+    disarmDelete();
+    cancelEditBtn.hidden = false;
+    deleteCardBtn.hidden = false;
+    showView('edit');
+});
+
+backToCardsBtn.addEventListener('click', () => {
+    activeCard = null;
+    renderCardsGrid();
+    showView('cards');
+});
 
 publishBtn.addEventListener('click', async () => {
+    if (!activeCard) return;
     publishBtn.disabled = true;
     setStatus('Publishing…');
     try {
-        const updated = await core.invoke('publish_card');
-        card = updated;
-        renderPublishLink(updated);
+        const updated = await core.invoke('publish_card', { cardId: activeCard.id });
+        applyCardUpdate(updated);
         setStatus('Link ready!');
     } catch (err) {
         setStatus(`Couldn't publish: ${err}`);
@@ -488,9 +688,10 @@ copyLinkBtn.addEventListener('click', async () => {
 });
 
 shareBtn.addEventListener('click', async () => {
+    if (!activeCard) return;
     shareBtn.disabled = true;
     try {
-        const url = card?.shareUrl || (await core.invoke('publish_card')).shareUrl;
+        const url = activeCard.shareUrl || (await core.invoke('publish_card', { cardId: activeCard.id })).shareUrl;
         await core.invoke('plugin:share-sheet|share_text', { text: url });
     } catch (err) {
         setStatus(`Couldn't share: ${err}`);
@@ -499,28 +700,35 @@ shareBtn.addEventListener('click', async () => {
     }
 });
 
-shareAppGroupBtn.addEventListener('click', async () => {
-    shareAppGroupBtn.disabled = true;
+// ── Referral link ─────────────────────────────────────────────────────────────
+//
+// No preview/copy row, just a button. Tapping it asks Rust for this
+// install's referral link (registering one with BDO/savage on first launch,
+// reusing the cached one after that) and hands it straight to the native
+// share sheet as a real URL.
+referralShareBtn.addEventListener('click', async () => {
+    referralShareBtn.disabled = true;
     try {
-        await core.invoke('share_card_to_app_group');
-        setStatus('Shared — BizBuz can now import this card.');
+        const url = await core.invoke('get_or_create_referral_link');
+        await core.invoke('plugin:share-sheet|share_text', { text: url });
     } catch (err) {
         setStatus(`Couldn't share: ${err}`);
     } finally {
-        shareAppGroupBtn.disabled = false;
+        referralShareBtn.disabled = false;
     }
 });
 
 // ── Canonical profile ────────────────────────────────────────────────────────
 //
-// A separate, App-Group-shared record — independent of `card`/`pendingLinks`
+// A separate, App-Group-shared record — independent of `cards`/`activeCard`
 // above. Its own photo/field-list state is kept apart from the card editor's
-// so editing this screen can never bleed into the LinkCard being edited.
-// Every field (built-in or pulled-in) is a {slug, name, value} tuple — the
-// slug is the stable machine identity used for dedup, `name` is a human
-// label, `value` is the content. Mirrors slugify() in src-tauri/src/lib.rs.
+// so editing this screen can never bleed into whichever card is currently
+// being edited. Every field (built-in or pulled-in) is a {slug, name, value}
+// tuple — the slug is the stable machine identity used for dedup, `name` is
+// a human label, `value` is the content. Mirrors slugify() in
+// src-tauri/src/lib.rs.
 
-let preProfileView = 'edit'; // the view to return to on Close/Save
+let preProfileView = 'cards'; // the view to return to on Close/Save
 let pendingProfilePhoto = null;
 let pendingProfileFields = [];
 let editingProfileFieldIndex = null;
@@ -662,37 +870,39 @@ profileChoosePhotoBtn.addEventListener('click', async () => {
     }
 });
 
-// Local-only: reads the `card` already loaded in memory (this app's own
-// single saved LinkCard). Never overwrites a field already present in the
-// profile.
+// Local-only: reads the `cards` array already loaded in memory (all of
+// this app's own saved cards, not just the active one). First-non-empty-
+// per-slug wins; never overwrites a field already present in the profile.
 profilePullBtn.addEventListener('click', () => {
-    if (!card) {
-        setStatus('No Linkitylink card saved yet.');
+    if (cards.length === 0) {
+        setStatus('No Linkitylink cards saved yet.');
         return;
     }
     const existingSlugs = new Set(pendingProfileFields.map((f) => f.slug));
-    if (card.name && !existingSlugs.has('name')) {
-        pendingProfileFields.push({ slug: 'name', name: 'Name', value: card.name });
-        existingSlugs.add('name');
-    }
-    if (card.bio && !existingSlugs.has('bio')) {
-        pendingProfileFields.push({ slug: 'bio', name: 'Bio', value: card.bio });
-        existingSlugs.add('bio');
-    }
-    for (const link of card.links || []) {
-        const name = link.label || link.url;
-        const slug = slugify(name);
-        if (slug && !existingSlugs.has(slug)) {
-            pendingProfileFields.push({ slug, name, value: link.url });
-            existingSlugs.add(slug);
+    for (const c of cards) {
+        if (c.name && !existingSlugs.has('name')) {
+            pendingProfileFields.push({ slug: 'name', name: 'Name', value: c.name });
+            existingSlugs.add('name');
+        }
+        if (c.bio && !existingSlugs.has('bio')) {
+            pendingProfileFields.push({ slug: 'bio', name: 'Bio', value: c.bio });
+            existingSlugs.add('bio');
+        }
+        for (const link of c.links || []) {
+            const name = link.label || link.url;
+            const slug = slugify(name);
+            if (slug && !existingSlugs.has(slug)) {
+                pendingProfileFields.push({ slug, name, value: link.url });
+                existingSlugs.add(slug);
+            }
+        }
+        if (c.photo && !pendingProfilePhoto) {
+            pendingProfilePhoto = c.photo;
+            setAvatarContent(profilePhotoPreview, pendingProfilePhoto, '');
         }
     }
-    if (card.photo && !pendingProfilePhoto) {
-        pendingProfilePhoto = card.photo;
-        setAvatarContent(profilePhotoPreview, pendingProfilePhoto, '');
-    }
     renderProfileFields();
-    setStatus('Pulled in fields from your link card.');
+    setStatus('Pulled in fields from your link cards.');
 });
 
 function fillProfileForm(profile) {
@@ -711,9 +921,10 @@ function canonicalProfileFromForm() {
 }
 
 function currentViewName() {
+    if (!cardsView.hidden) return 'cards';
     if (!editView.hidden) return 'edit';
     if (!cardView.hidden) return 'card';
-    return 'edit';
+    return 'cards';
 }
 
 profileNavBtn.addEventListener('click', async () => {
@@ -740,4 +951,26 @@ profileForm.addEventListener('submit', async (e) => {
 
 profileCloseBtn.addEventListener('click', () => showView(preProfileView));
 
-loadCard();
+function populateCategorySelect() {
+    const select = document.getElementById('field-category');
+    for (const c of categories) {
+        const opt = document.createElement('option');
+        opt.value = c.slug;
+        opt.textContent = c.label;
+        select.appendChild(opt);
+    }
+}
+
+async function init() {
+    try {
+        categories = await core.invoke('get_categories');
+    } catch {
+        categories = [];
+    }
+    categoryLabels = Object.fromEntries(categories.map((c) => [c.slug, c.label]));
+    populateCategorySelect();
+    await loadCards();
+    backgroundPublishAllCards();
+}
+
+init();

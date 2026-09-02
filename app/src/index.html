@@ -9,47 +9,73 @@
 <body>
     <main id="app">
         <button type="button" class="profile-nav-btn" id="profile-nav-btn">Profile</button>
+        <button type="button" class="back-nav-btn" id="back-to-cards-btn" hidden>◀ My Cards</button>
+
+        <!-- My Link Cards view -->
+        <section id="cards-view" class="view" hidden>
+            <header class="view-header">
+                <h1>My Link Cards</h1>
+                <p class="subtitle">Keep up to 4 — work, personal, whatever you need.</p>
+            </header>
+
+            <div class="cards-grid" id="cards-grid"></div>
+
+            <section class="referral-section">
+                <p class="referral-label">Invite friends to Linkitylink</p>
+                <button type="button" class="btn btn-secondary" id="referral-share-btn">Share Linkitylink</button>
+            </section>
+        </section>
 
         <!-- Edit view -->
         <section id="edit-view" class="view" hidden>
-            <header class="view-header">
-                <h1>Your Link Card</h1>
-                <p class="subtitle">This stays on your device — nothing is uploaded until you publish.</p>
-            </header>
+            <div class="view-scroll">
+                <header class="view-header">
+                    <h1>Link Card</h1>
+                    <p class="subtitle">This stays on your device — nothing is uploaded until you publish.</p>
+                </header>
 
-            <form id="card-form">
-                <div class="avatar avatar-editable" id="photo-preview"></div>
-                <button type="button" class="btn btn-secondary" id="choose-photo-btn">Choose Photo</button>
+                <form id="card-form">
+                    <div class="avatar avatar-editable" id="photo-preview"></div>
+                    <button type="button" class="btn btn-secondary" id="choose-photo-btn">Choose Photo</button>
 
-                <label>Name
-                    <input type="text" id="field-name" placeholder="Ada Lovelace">
-                </label>
-                <label>Bio
-                    <textarea id="field-bio" rows="2" placeholder="A short bio"></textarea>
-                </label>
+                    <label>Name
+                        <input type="text" id="field-name" placeholder="Ada Lovelace">
+                    </label>
+                    <label>Bio
+                        <textarea id="field-bio" rows="2" placeholder="A short bio"></textarea>
+                    </label>
+                    <label>Category
+                        <select id="field-category">
+                            <option value="">None</option>
+                        </select>
+                    </label>
 
-                <p class="section-label">Links</p>
+                    <p class="section-label">Links</p>
 
-                <div class="link-entry-form" id="link-import-form">
-                    <input type="text" id="import-url" placeholder="Paste a Linktree, lnk.bio, etc. URL">
-                    <button type="button" class="btn btn-secondary" id="import-links-btn">Import</button>
-                </div>
-                <button type="button" class="btn btn-secondary" id="import-bizbuz-btn">Import from BizBuz</button>
+                    <div class="link-entry-form" id="link-import-form">
+                        <input type="text" id="import-url" placeholder="Paste a Linktree, lnk.bio, etc. URL">
+                        <button type="button" class="btn btn-secondary" id="import-links-btn">Import</button>
+                    </div>
+                    <button type="button" class="btn btn-secondary" id="import-bizbuz-btn">Import from BizBuz</button>
 
-                <ul class="link-entries" id="link-entries"></ul>
+                    <ul class="link-entries" id="link-entries"></ul>
 
-                <div class="link-entry-form">
-                    <input type="text" id="new-link-label" placeholder="Label (e.g. Portfolio)" maxlength="40">
-                    <input type="text" id="new-link-url" placeholder="URL">
-                    <button type="button" class="btn btn-secondary" id="add-link-btn">Add Link</button>
-                </div>
-                <p class="hint" id="link-limit-hint" hidden>Up to 10 links — remove one to add another.</p>
+                    <div class="link-entry-form">
+                        <input type="text" id="new-link-label" placeholder="Label (e.g. Portfolio)" maxlength="40">
+                        <input type="text" id="new-link-url" placeholder="URL">
+                        <button type="button" class="btn btn-secondary" id="add-link-btn">Add Link</button>
+                    </div>
+                    <p class="hint hint-warning" id="link-limit-hint" hidden>Up to 16 links — remove one to add another.</p>
+                </form>
+            </div>
 
+            <div class="view-footer">
                 <div class="form-actions">
-                    <button type="submit" class="btn btn-primary">Save</button>
+                    <button type="submit" form="card-form" class="btn btn-primary">Save</button>
                     <button type="button" class="btn btn-secondary" id="cancel-edit-btn" hidden>Cancel</button>
                 </div>
-            </form>
+                <button type="button" class="btn btn-danger" id="delete-card-btn" hidden>Delete Card</button>
+            </div>
         </section>
 
         <!-- Card view -->
@@ -58,6 +84,7 @@
                 <div class="avatar" id="card-avatar"></div>
                 <h1 class="card-name" id="card-name"></h1>
                 <p class="card-bio" id="card-bio"></p>
+                <p class="hint" id="card-category" hidden></p>
 
                 <div class="link-list" id="card-links"></div>
 
@@ -68,37 +95,38 @@
                     <button type="button" class="btn btn-secondary btn-copy" id="copy-link-btn">Copy</button>
                 </div>
                 <button type="button" class="btn btn-primary" id="share-btn">Share</button>
-                <button type="button" class="btn btn-secondary" id="share-app-group-btn">Share to App Group</button>
             </div>
         </section>
 
         <!-- Canonical profile view — a separate, App-Group-shared record; not
              connected to this app's own LinkCard / link_card.json in any way. -->
         <section id="profile-view" class="view" hidden>
-            <header class="view-header">
-                <h1>Shared Profile</h1>
-                <p class="subtitle">Synced across BizBuz, Linkitylink, and other apps in this group.</p>
-            </header>
+            <div class="view-scroll">
+                <header class="view-header">
+                    <h1>Shared Profile</h1>
+                    <p class="subtitle">Synced across BizBuz, Linkitylink, and other apps in this group.</p>
+                </header>
 
-            <form id="canonical-profile-form">
-                <div class="avatar avatar-editable" id="profile-photo-preview"></div>
-                <button type="button" class="btn btn-secondary" id="profile-choose-photo-btn">Choose Photo</button>
-                <button type="button" class="btn btn-secondary" id="profile-pull-btn">Fill from My Card</button>
+                <form id="canonical-profile-form">
+                    <div class="avatar avatar-editable" id="profile-photo-preview"></div>
+                    <button type="button" class="btn btn-secondary" id="profile-choose-photo-btn">Choose Photo</button>
+                    <button type="button" class="btn btn-secondary" id="profile-pull-btn">Fill from My Cards</button>
 
-                <p class="section-label">Fields</p>
-                <ul class="link-entries" id="profile-fields"></ul>
-                <div class="link-entry-form">
-                    <input type="text" id="profile-new-field-name" placeholder="Field (e.g. GitHub)" maxlength="40">
-                    <input type="text" id="profile-new-field-value" placeholder="Value">
-                    <button type="button" class="btn btn-secondary" id="profile-add-field-btn">Add Field</button>
-                </div>
-                <p class="hint" id="profile-field-limit-hint" hidden>Up to 20 fields — remove one to add another.</p>
+                    <p class="section-label">Fields</p>
+                    <ul class="link-entries" id="profile-fields"></ul>
+                    <div class="link-entry-form">
+                        <input type="text" id="profile-new-field-name" placeholder="Field (e.g. GitHub)" maxlength="40">
+                        <input type="text" id="profile-new-field-value" placeholder="Value">
+                        <button type="button" class="btn btn-secondary" id="profile-add-field-btn">Add Field</button>
+                    </div>
+                    <p class="hint" id="profile-field-limit-hint" hidden>Up to 20 fields — remove one to add another.</p>
+                </form>
+            </div>
 
-                <div class="form-actions">
-                    <button type="submit" class="btn btn-primary">Save</button>
-                    <button type="button" class="btn btn-secondary" id="profile-close-btn">Close</button>
-                </div>
-            </form>
+            <div class="view-footer">
+                <button type="submit" form="canonical-profile-form" class="btn btn-primary">Save</button>
+                <button type="button" class="btn btn-secondary" id="profile-close-btn">Close</button>
+            </div>
         </section>
 
         <p class="status-msg" id="status-msg"></p>

@@ -2,6 +2,8 @@
     --green: #10b981;
     --green-dark: #059669;
     --purple: #a78bfa;
+    --amber: #f59e0b;
+    --amber-bg: rgba(245, 158, 11, 0.14);
     --bg: #0a001a;
     --white-70: rgba(255, 255, 255, 0.7);
     --white-10: rgba(255, 255, 255, 0.1);
@@ -66,7 +68,7 @@ label {
     color: var(--white-70);
 }
 
-input, textarea {
+input, textarea, select {
     background: var(--white-05);
     border: 1px solid var(--white-10);
     border-radius: 10px;
@@ -76,7 +78,7 @@ input, textarea {
     font-family: inherit;
 }
 
-input:focus, textarea:focus {
+input:focus, textarea:focus, select:focus {
     outline: none;
     border-color: var(--green);
 }
@@ -165,6 +167,79 @@ textarea {
     padding: 36px 28px;
     text-align: center;
     box-shadow: 0 0 40px rgba(16, 185, 129, 0.1);
+    /* Generous clearance so the card's own bottom buttons never sit behind
+       the fixed profile/back nav row below — same fix as BizBuz's .card. */
+    margin-bottom: 100px;
+}
+
+/* ── My Link Cards grid ──────────────────────────────────────────────────── */
+
+.cards-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+}
+
+.referral-section {
+    margin-top: 28px;
+    padding-top: 20px;
+    border-top: 1px solid var(--white-10);
+}
+
+.referral-label {
+    font-size: 13px;
+    color: var(--white-70);
+    margin-bottom: 10px;
+}
+
+.referral-section .btn {
+    width: 100%;
+}
+
+.card-tile {
+    aspect-ratio: 1;
+    border-radius: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    cursor: pointer;
+    border: none;
+    font-family: inherit;
+    padding: 16px;
+}
+
+.card-tile.filled {
+    background: var(--white-05);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.card-tile.filled .avatar {
+    width: 56px;
+    height: 56px;
+    font-size: 20px;
+    margin: 0;
+    box-shadow: none;
+}
+
+.card-tile.filled .card-tile-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: white;
+    text-align: center;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.card-tile.empty {
+    background: transparent;
+    border: 1px dashed var(--white-10);
+    color: var(--white-70);
+    font-size: 32px;
+    font-weight: 300;
 }
 
 .avatar {
@@ -319,12 +394,28 @@ textarea {
     color: var(--white-70);
 }
 
-/* ── Canonical profile nav button ────────────────────────────────────────── */
+.hint-warning {
+    color: var(--amber);
+    background: var(--amber-bg);
+    padding: 8px 12px;
+    border-radius: 8px;
+    margin-top: 8px;
+}
 
-.profile-nav-btn {
+.btn-danger {
+    background: transparent;
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    margin-top: 14px;
+    width: 100%;
+}
+
+/* ── Canonical profile / back nav buttons ────────────────────────────────── */
+
+.profile-nav-btn,
+.back-nav-btn {
     position: fixed;
     bottom: calc(20px + env(safe-area-inset-bottom));
-    right: calc(20px + env(safe-area-inset-right));
     background: var(--white-10);
     border: 1px solid var(--white-10);
     color: white;
@@ -335,6 +426,85 @@ textarea {
     cursor: pointer;
     z-index: 100;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.profile-nav-btn {
+    right: calc(20px + env(safe-area-inset-right));
+}
+
+.back-nav-btn {
+    left: calc(20px + env(safe-area-inset-left));
+}
+
+/* ── Sticky-footer views (Profile, Edit Card) ─────────────────────────────
+   Same pattern as BizBuz — the view breaks out of #app's normal document
+   flow into its own full-height flex column (scrollable content + pinned
+   footer) only while active, so action buttons stay reachable without
+   scrolling. The `:not([hidden])` guard is required since an #id selector
+   otherwise outranks the browser's own `[hidden]{display:none}` rule. */
+
+#profile-view:not([hidden]),
+#edit-view:not([hidden]) {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    padding: 0;
+    z-index: 50;
+    overflow: hidden;
+}
+
+#profile-view .view-scroll,
+#edit-view .view-scroll {
+    flex: 1;
+    /* Without this, a flex item defaults to min-height:auto, so it grows
+       to fit ALL its content instead of shrinking to the space actually
+       left in the column — the scroll area then overflows past the fixed
+       viewport instead of scrolling within it, and .view-footer's buttons
+       end up pushed out of reach below the fold. */
+    min-height: 0;
+    overflow-y: auto;
+    max-width: 480px;
+    width: 100%;
+    margin: 0 auto;
+    padding: calc(24px + env(safe-area-inset-top))
+             calc(20px + env(safe-area-inset-right))
+             20px
+             calc(20px + env(safe-area-inset-left));
+}
+
+#profile-view .view-footer,
+#edit-view .view-footer {
+    flex-shrink: 0;
+    max-width: 480px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 16px calc(20px + env(safe-area-inset-right))
+             calc(20px + env(safe-area-inset-bottom))
+             calc(20px + env(safe-area-inset-left));
+    border-top: 1px solid var(--white-10);
+    background: var(--bg);
+}
+
+#profile-view .view-footer {
+    display: flex;
+    gap: 12px;
+}
+
+#profile-view .view-footer .btn {
+    flex: 1;
+    margin-top: 0;
+}
+
+#edit-view .view-footer {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+#edit-view .view-footer .form-actions {
+    margin: 0;
 }
 
 .status-msg {
