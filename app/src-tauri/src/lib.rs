@@ -484,15 +484,31 @@ fn detect_platform(url: &str) -> Option<&'static PlatformIcon> {
     })
 }
 
-/// Simple perceived-luminance check (YIQ-style weighting) to choose a
-/// readable icon fill against a given brand color's badge background.
-fn readable_icon_fill(hex: &str) -> &'static str {
+/// Perceived luminance (YIQ weighting), 0-255.
+fn luminance(hex: &str) -> f64 {
     let hex = hex.trim_start_matches('#');
     let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(0) as f64;
     let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(0) as f64;
     let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(0) as f64;
-    let luminance = 0.299 * r + 0.587 * g + 0.114 * b;
-    if luminance > 150.0 {
+    0.299 * r + 0.587 * g + 0.114 * b
+}
+
+/// Outline for a brand badge that would otherwise vanish into the dark card.
+/// GitHub, X, TikTok, Threads and friends brand in black or near-black, which
+/// sits on the #1a1a1a ground with no visible edge. Brighter badges already
+/// stand out, so they get no stroke rather than an outline that only adds noise.
+fn badge_outline(hex: &str) -> String {
+    if luminance(hex) < 60.0 {
+        format!(r#" stroke="rgba({PALETTE_INK_RGB},0.35)" stroke-width="1""#)
+    } else {
+        String::new()
+    }
+}
+
+/// Simple perceived-luminance check (YIQ-style weighting) to choose a
+/// readable icon fill against a given brand color's badge background.
+fn readable_icon_fill(hex: &str) -> &'static str {
+    if luminance(hex) > 150.0 {
         "#0a001a"
     } else {
         "white"
@@ -594,8 +610,9 @@ fn render_card_svg(card: &LinkCard) -> String {
             let icon_area = BADGE - PADDING * 2.0;
             let scale = icon_area / p.view_size;
             icon_svg = format!(
-                r#"<rect x="{badge_x}" y="{badge_y}" width="{BADGE}" height="{BADGE}" rx="8" fill="{}"/><g transform="translate({},{}) scale({scale})"><title>{}</title><path d="{}" fill="{}"/></g>"#,
+                r#"<rect x="{badge_x}" y="{badge_y}" width="{BADGE}" height="{BADGE}" rx="8" fill="{}"{}/><g transform="translate({},{}) scale({scale})"><title>{}</title><path d="{}" fill="{}"/></g>"#,
                 p.hex,
+                badge_outline(p.hex),
                 badge_x + PADDING,
                 badge_y + PADDING,
                 escape_xml(p.name),
