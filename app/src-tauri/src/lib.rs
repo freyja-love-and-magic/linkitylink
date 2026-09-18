@@ -23,23 +23,31 @@ const BDO_HASH: &str = "linkitylink-card";
 
 // ── Palette ──────────────────────────────────────────────────────────────────
 //
-// HomeVentory light mode, matching the app UI in style.css. render_card_svg
-// and render_referral_svg each carried their own copy of the pre-HomeVentory
-// dark scheme (#0a001a / #10b981 / #a78bfa), so a published card looked like
-// a different product from the app that made it.
+// HomeVentory dark, matching the app's own dark mode in style.css (the
+// `prefers-color-scheme: dark` block: #1a1a1a ground, glacier-white text).
+// Dark is the default look of the app, so the published card matches it.
+//
+// Evergreen stays for FILLED surfaces — the avatar circle and the button —
+// but not for text on the ground: #2E5E4E on #1a1a1a is about 2.3:1, too low
+// to read. Text that used to be evergreen (the name, the link arrows) uses
+// soft mint instead, which is in the same HomeVentory palette.
 //
 // PALETTE_* is also sent to savage on publish (see publish_card), which themes
 // the page chrome around the card. Without it savage falls back to BizBuz's
 // old colours for every app it serves.
-const PALETTE_BG: &str = "#F7F9FA";        // glacier white
+const PALETTE_BG: &str = "#1a1a1a";        // app dark-mode ground
 const PALETTE_GREEN: &str = "#2E5E4E";     // deep evergreen
 const PALETTE_GREEN_DARK: &str = "#1F4A3E";
 const PALETTE_ACCENT: &str = "#4FA3F7";    // signal blue
-/// Midnight slate (#1F2933) as rgb components. The published SVGs need the ink
+const PALETTE_MINT: &str = "#AEE1D6";      // soft mint — accent text on dark
+/// Text drawn ON an evergreen fill (avatar initials, button label). Was
+/// written as {BG}, which only worked while BG happened to be light.
+const PALETTE_ON_GREEN: &str = "#F7F9FA";  // glacier white
+/// Glacier white (#F7F9FA) as rgb components — the ink on the dark ground. The published SVGs need the ink
 /// colour at several opacities, and a Rust raw string can't carry an inline
 /// hex literal (`r#"..."#` terminates at the first `"#`), so these are
 /// interpolated as rgba(...) rather than written as hex.
-const PALETTE_INK_RGB: &str = "31,41,51";
+const PALETTE_INK_RGB: &str = "247,249,250";
 const MAX_CARDS: usize = 4;
 
 // BDO mints its own server-side uuid on create_user, distinct from the local
@@ -502,7 +510,11 @@ fn render_card_svg(card: &LinkCard) -> String {
     const ROW_HEIGHT: u32 = 56;
 
     let name = card.name.clone().unwrap_or_else(|| "".to_string());
-    let mut y: u32 = 190;
+    // Name baseline. The avatar's bottom edge is cy + r = 170, and a 26px bold
+    // name's cap height reaches ~19px above its baseline — at 190 that left
+    // about a pixel between them. 216 gives the photo real breathing room;
+    // everything below is laid out from `y`, so it all moves down with it.
+    let mut y: u32 = 216;
     let mut body = String::new();
 
     let cx = WIDTH / 2;
@@ -522,7 +534,7 @@ fn render_card_svg(card: &LinkCard) -> String {
     } else {
         body.push_str(&format!(
             r#"<circle cx="{cx}" cy="{cy}" r="{r}" fill="{GREEN}"/>
-<text x="{cx}" y="{}" font-family="sans-serif" font-size="40" font-weight="bold" fill="{BG}" text-anchor="middle">{}</text>
+<text x="{cx}" y="{}" font-family="sans-serif" font-size="40" font-weight="bold" fill="{PALETTE_ON_GREEN}" text-anchor="middle">{}</text>
 "#,
             cy + 14,
             escape_xml(&get_initials(&name)),
@@ -530,7 +542,7 @@ fn render_card_svg(card: &LinkCard) -> String {
     }
 
     body.push_str(&format!(
-        r#"<text x="{cx}" y="{y}" font-family="sans-serif" font-size="26" font-weight="bold" fill="{GREEN}" text-anchor="middle">{}</text>
+        r#"<text x="{cx}" y="{y}" font-family="sans-serif" font-size="26" font-weight="bold" fill="{PALETTE_MINT}" text-anchor="middle">{}</text>
 "#,
         escape_xml(&name),
     ));
@@ -567,7 +579,11 @@ fn render_card_svg(card: &LinkCard) -> String {
         }
         let href = normalize_url(entry.url.trim());
         let platform = detect_platform(&href);
-        let text_y = y + ROW_HEIGHT / 2 + 5;
+        // Centre on the drawn row, not the slot. The rect is ROW_HEIGHT - 12
+        // tall (the 12 is the gap to the next row) and the icon badge is
+        // centred on that — centring the text on the full ROW_HEIGHT put the
+        // label 6px below the icon's centre line.
+        let text_y = y + (ROW_HEIGHT - 12) / 2 + 5;
 
         let mut icon_svg = String::new();
         let label_x = if let Some(p) = platform {
@@ -594,7 +610,7 @@ fn render_card_svg(card: &LinkCard) -> String {
         let display_label = truncate_label(&label, max_label_chars);
 
         body.push_str(&format!(
-            r#"<a href="{}"><rect x="{row_x}" y="{y}" width="{row_width}" height="{}" rx="12" fill="rgba({PALETTE_INK_RGB},0.04)" stroke="rgba({PALETTE_INK_RGB},0.12)"/>{icon_svg}<text x="{label_x}" y="{text_y}" font-family="sans-serif" font-size="15" font-weight="600" fill="rgba({PALETTE_INK_RGB},0.92)">{}</text><text x="{}" y="{text_y}" font-family="sans-serif" font-size="15" fill="{GREEN}" text-anchor="end">&#8594;</text></a>
+            r#"<a href="{}"><rect x="{row_x}" y="{y}" width="{row_width}" height="{}" rx="12" fill="rgba({PALETTE_INK_RGB},0.04)" stroke="rgba({PALETTE_INK_RGB},0.12)"/>{icon_svg}<text x="{label_x}" y="{text_y}" font-family="sans-serif" font-size="15" font-weight="600" fill="rgba({PALETTE_INK_RGB},0.92)">{}</text><text x="{}" y="{text_y}" font-family="sans-serif" font-size="15" fill="{PALETTE_MINT}" text-anchor="end">&#8594;</text></a>
 "#,
             escape_xml(&href),
             ROW_HEIGHT - 12,
@@ -906,7 +922,7 @@ async fn publish_card(app: tauri::AppHandle, card_id: String) -> Result<LinkCard
         serde_json::json!({
             "background": PALETTE_BG,
             "accent": PALETTE_GREEN,
-            "accentText": PALETTE_BG,
+            "accentText": PALETTE_ON_GREEN,
         }),
     );
 
@@ -1005,14 +1021,14 @@ fn render_referral_svg(app_store_url: &str) -> String {
 
     format!(
         r#"<svg xmlns="http://www.w3.org/2000/svg" width="{WIDTH}" height="{HEIGHT}" viewBox="0 0 {WIDTH} {HEIGHT}">
-<defs><linearGradient id="markGradient" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="{GREEN}"/><stop offset="100%" stop-color="{PURPLE}"/></linearGradient></defs>
+<defs><linearGradient id="markGradient" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="{PALETTE_MINT}"/><stop offset="100%" stop-color="{PURPLE}"/></linearGradient></defs>
 <rect x="0" y="0" width="{WIDTH}" height="{HEIGHT}" fill="{BG}"/>
 <rect x="{}" y="90" width="90" height="50" rx="25" fill="none" stroke="url(#markGradient)" stroke-width="10"/>
 <rect x="{}" y="115" width="90" height="50" rx="25" fill="none" stroke="url(#markGradient)" stroke-width="10"/>
 <text x="{cx}" y="210" font-family="sans-serif" font-size="30" font-weight="bold" fill="url(#markGradient)" text-anchor="middle">Linkitylink</text>
 <text x="{cx}" y="240" font-family="sans-serif" font-size="14" fill="rgba({PALETTE_INK_RGB},0.7)" text-anchor="middle">All your links, one shareable page.</text>
 <text x="{cx}" y="270" font-family="sans-serif" font-size="14" fill="{PURPLE}" text-anchor="middle">You've been invited to try it out.</text>
-<a href="{}"><rect x="{}" y="{button_y}" width="260" height="56" rx="16" fill="{GREEN}"/><text x="{cx}" y="{}" font-family="sans-serif" font-size="18" font-weight="bold" fill="{BG}" text-anchor="middle">Get Linkitylink</text></a>
+<a href="{}"><rect x="{}" y="{button_y}" width="260" height="56" rx="16" fill="{GREEN}"/><text x="{cx}" y="{}" font-family="sans-serif" font-size="18" font-weight="bold" fill="{PALETTE_ON_GREEN}" text-anchor="middle">Get Linkitylink</text></a>
 <text x="{cx}" y="400" font-family="sans-serif" font-size="11" fill="rgba({PALETTE_INK_RGB},0.4)" text-anchor="middle">a Freyja offering</text>
 </svg>"#,
         cx - 110,
