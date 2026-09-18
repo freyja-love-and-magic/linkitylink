@@ -1,13 +1,35 @@
 :root {
-    --green: #10b981;
-    --green-dark: #059669;
-    --purple: #a78bfa;
-    --amber: #f59e0b;
-    --amber-bg: rgba(245, 158, 11, 0.14);
-    --bg: #0a001a;
-    --white-70: rgba(255, 255, 255, 0.7);
-    --white-10: rgba(255, 255, 255, 0.1);
-    --white-05: rgba(255, 255, 255, 0.05);
+    /* HomeVentory palette */
+    --midnight-slate: #1F2933;
+    --glacier-white: #F7F9FA;
+    --soft-mint: #AEE1D6;
+    --warm-sandstone: #E5D7C5;
+    --deep-evergreen: #2E5E4E;
+    --signal-blue: #4FA3F7;
+
+    /* Legacy aliases mapped to HomeVentory palette */
+    --green: var(--deep-evergreen);
+    --green-dark: #1F4A3E;
+    --purple: var(--signal-blue);
+    --amber: #B87E2A;
+    --amber-bg: rgba(229, 215, 197, 0.5);
+    --bg: var(--glacier-white);
+    --fg: var(--midnight-slate);
+    --white-70: rgba(31, 41, 51, 0.7);
+    --white-10: rgba(31, 41, 51, 0.08);
+    --white-05: #FFFFFF;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #1a1a1a;
+        --fg: var(--glacier-white);
+        --amber: #F5A623;
+        --amber-bg: rgba(245, 166, 35, 0.15);
+        --white-70: rgba(247, 249, 250, 0.7);
+        --white-10: rgba(247, 249, 250, 0.1);
+        --white-05: #2a2a2a;
+    }
 }
 
 * {
@@ -19,7 +41,7 @@
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     background: var(--bg);
-    color: white;
+    color: var(--fg);
     min-height: 100vh;
 }
 
@@ -28,10 +50,13 @@ body {
     margin: 0 auto;
     /* body stays unpadded so its background fills the whole viewport
        (including behind the notch/Dynamic Island and home indicator) —
-       the content itself is what needs to clear the safe areas. */
+       the content itself is what needs to clear the safe areas. Nav
+       buttons now live in a static .app-header at the top, so the bottom
+       padding just needs to keep .status-msg (fixed at ~24px + safe-area
+       from the bottom) from sitting on the last line of content. */
     padding: calc(24px + env(safe-area-inset-top))
              calc(20px + env(safe-area-inset-right))
-             calc(90px + env(safe-area-inset-bottom))
+             calc(40px + env(safe-area-inset-bottom))
              calc(20px + env(safe-area-inset-left));
 }
 
@@ -73,7 +98,7 @@ input, textarea, select {
     border: 1px solid var(--white-10);
     border-radius: 10px;
     padding: 12px 14px;
-    color: white;
+    color: var(--fg);
     font-size: 15px;
     font-family: inherit;
 }
@@ -88,10 +113,119 @@ textarea {
 }
 
 .section-label {
-    font-size: 14px;
-    color: var(--purple);
-    margin-top: 8px;
+    font-size: 12px;
+    color: var(--white-70);
+    margin-top: 16px;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
 }
+
+/* ── Socials icon grid (Edit view) ──────────────────────────────────────── */
+
+.socials-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-bottom: 6px;
+}
+
+.social-icon-btn {
+    aspect-ratio: 1;
+    border: 1px solid var(--white-10);
+    background: var(--white-05);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    color: var(--white-70);
+    transition: transform 0.15s;
+    font-family: inherit;
+    overflow: hidden;
+}
+.social-icon-btn:active { transform: translateY(1px); }
+.social-icon-btn svg {
+    width: 50%;
+    height: 50%;
+    max-width: 30px;
+    max-height: 30px;
+    display: block;
+    fill: currentColor;
+}
+.social-icon-btn .letter-mono {
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1;
+}
+.social-icon-btn.filled {
+    background: var(--green);
+    border-color: var(--green);
+    color: var(--glacier-white);
+}
+.social-icon-btn.expanded {
+    box-shadow: 0 0 0 2px var(--green);
+}
+
+.social-disclosure {
+    margin: 0 0 12px;
+    padding: 10px 12px;
+    background: var(--white-05);
+    border: 1px solid var(--white-10);
+    border-radius: 10px;
+}
+.social-disclosure-title {
+    display: block;
+    font-size: 11px;
+    color: var(--white-70);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 6px;
+}
+.social-disclosure-body {
+    display: flex;
+    gap: 8px;
+}
+.social-disclosure-body input {
+    flex: 1;
+    padding: 8px 12px;
+    font-size: 14px;
+    border-radius: 8px;
+}
+.social-disclosure-body button {
+    padding: 8px 14px;
+    font-size: 13px;
+    width: auto;
+}
+
+/* ── Card view socials row (viewing a saved card) ───────────────────────── */
+
+.card-socials {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin: 12px 0 20px;
+}
+.card-social-link {
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
+    background: var(--white-05);
+    border: 1px solid var(--white-10);
+    text-decoration: none;
+    padding: 0;
+    transition: transform 0.15s;
+    overflow: hidden;
+}
+.card-social-link:active { transform: translateY(1px); }
+.card-social-link svg { width: 55%; height: 55%; display: block; fill: currentColor; }
+.card-social-link .letter-mono { font-size: 18px; font-weight: 700; line-height: 1; }
 
 .btn {
     padding: 14px 20px;
@@ -105,8 +239,8 @@ textarea {
 
 .btn-primary {
     background: linear-gradient(135deg, var(--green) 0%, var(--green-dark) 100%);
-    color: white;
-    box-shadow: 0 4px 20px rgba(16, 185, 129, 0.3);
+    color: var(--glacier-white);
+    box-shadow: 0 4px 20px rgba(46, 94, 78, 0.3);
     width: 100%;
 }
 
@@ -116,7 +250,7 @@ textarea {
 
 .btn-secondary {
     background: var(--white-10);
-    color: white;
+    color: var(--fg);
     border: 1px solid var(--white-10);
     width: 100%;
 }
@@ -132,6 +266,20 @@ textarea {
 
 #publish-btn, #edit-btn, #share-btn {
     margin-top: 12px;
+}
+
+/* App Group sharing — set off from the card's own Share/publish actions
+   above it, since it does something different (hands this card to sibling
+   apps rather than producing a public link). */
+.app-group-share {
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--white-10);
+}
+
+.app-group-share .hint {
+    margin-top: 8px;
+    text-align: center;
 }
 
 .link-row {
@@ -162,11 +310,11 @@ textarea {
 
 .card {
     background: var(--white-05);
-    border: 1px solid rgba(16, 185, 129, 0.3);
+    border: 1px solid rgba(46, 94, 78, 0.3);
     border-radius: 24px;
     padding: 36px 28px;
     text-align: center;
-    box-shadow: 0 0 40px rgba(16, 185, 129, 0.1);
+    box-shadow: 0 0 40px rgba(46, 94, 78, 0.1);
     /* Generous clearance so the card's own bottom buttons never sit behind
        the fixed profile/back nav row below — same fix as BizBuz's .card. */
     margin-bottom: 100px;
@@ -212,7 +360,7 @@ textarea {
 
 .card-tile.filled {
     background: var(--white-05);
-    border: 1px solid rgba(16, 185, 129, 0.3);
+    border: 1px solid rgba(46, 94, 78, 0.3);
 }
 
 .card-tile.filled .avatar {
@@ -226,12 +374,26 @@ textarea {
 .card-tile.filled .card-tile-name {
     font-size: 13px;
     font-weight: 600;
-    color: white;
+    color: var(--fg);
     text-align: center;
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+/* Marks the one card currently in the App Group (what BizBuz imports).
+   Sits inside the tile's flex column, under the name. */
+.card-tile-badge {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--green);
+    background: rgba(16, 185, 129, 0.12);
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    border-radius: 999px;
+    padding: 2px 8px;
 }
 
 .card-tile.empty {
@@ -253,8 +415,8 @@ textarea {
     justify-content: center;
     font-size: 36px;
     font-weight: bold;
-    color: white;
-    box-shadow: 0 0 30px rgba(16, 185, 129, 0.3);
+    color: var(--glacier-white);
+    box-shadow: 0 0 30px rgba(46, 94, 78, 0.3);
     background-size: cover;
     background-position: center;
 }
@@ -295,7 +457,7 @@ textarea {
     background: var(--white-05);
     border: 1px solid var(--white-10);
     border-radius: 12px;
-    color: white;
+    color: var(--fg);
     text-decoration: none;
     font-size: 14px;
     font-weight: 600;
@@ -370,7 +532,7 @@ textarea {
 .link-entry-actions button {
     background: var(--white-10);
     border: none;
-    color: white;
+    color: var(--fg);
     width: 28px;
     height: 28px;
     border-radius: 8px;
@@ -404,47 +566,55 @@ textarea {
 
 .btn-danger {
     background: transparent;
-    color: #ef4444;
-    border: 1px solid rgba(239, 68, 68, 0.4);
+    color: #ff3131;
+    border: 1px solid rgba(255, 49, 49, 0.4);
     margin-top: 14px;
     width: 100%;
 }
 
 /* ── Canonical profile / back nav buttons ────────────────────────────────── */
 
+.app-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+    min-height: 40px;
+}
+
 .profile-nav-btn,
 .back-nav-btn {
-    position: fixed;
-    bottom: calc(20px + env(safe-area-inset-bottom));
     background: var(--white-10);
     border: 1px solid var(--white-10);
-    color: white;
+    color: var(--fg);
     font-size: 14px;
     font-weight: 600;
-    padding: 12px 22px;
-    border-radius: 14px;
+    padding: 10px 18px;
+    border-radius: 12px;
     cursor: pointer;
-    z-index: 100;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+    font-family: inherit;
 }
 
+/* Push Profile to the right regardless of whether back-nav is shown or
+   hidden — an auto left-margin does this without needing an empty spacer. */
 .profile-nav-btn {
-    right: calc(20px + env(safe-area-inset-right));
+    margin-left: auto;
 }
 
-.back-nav-btn {
-    left: calc(20px + env(safe-area-inset-left));
-}
+/* ── Sticky-footer views (Profile only) ───────────────────────────────────
+   #profile-view breaks out of #app's normal document flow into its own
+   full-height flex column (scrollable content + pinned footer) only while
+   active, so Save/Close stay reachable without scrolling — the field list
+   can grow long (up to 20 entries). The `:not([hidden])` guard is required
+   since an #id selector otherwise outranks the browser's own
+   `[hidden]{display:none}` rule.
 
-/* ── Sticky-footer views (Profile, Edit Card) ─────────────────────────────
-   Same pattern as BizBuz — the view breaks out of #app's normal document
-   flow into its own full-height flex column (scrollable content + pinned
-   footer) only while active, so action buttons stay reachable without
-   scrolling. The `:not([hidden])` guard is required since an #id selector
-   otherwise outranks the browser's own `[hidden]{display:none}` rule. */
+   #edit-view intentionally uses BizBuz's simpler pattern instead: Save
+   scrolls with the form content and the fixed Profile button stays clear
+   of it thanks to #app's own padding-bottom. That keeps Save and Profile
+   from stacking on top of each other. */
 
-#profile-view:not([hidden]),
-#edit-view:not([hidden]) {
+#profile-view:not([hidden]) {
     position: fixed;
     inset: 0;
     display: flex;
@@ -455,8 +625,7 @@ textarea {
     overflow: hidden;
 }
 
-#profile-view .view-scroll,
-#edit-view .view-scroll {
+#profile-view .view-scroll {
     flex: 1;
     /* Without this, a flex item defaults to min-height:auto, so it grows
        to fit ALL its content instead of shrinking to the space actually
@@ -474,8 +643,7 @@ textarea {
              calc(20px + env(safe-area-inset-left));
 }
 
-#profile-view .view-footer,
-#edit-view .view-footer {
+#profile-view .view-footer {
     flex-shrink: 0;
     max-width: 480px;
     width: 100%;
@@ -485,9 +653,6 @@ textarea {
              calc(20px + env(safe-area-inset-left));
     border-top: 1px solid var(--white-10);
     background: var(--bg);
-}
-
-#profile-view .view-footer {
     display: flex;
     gap: 12px;
 }
@@ -497,14 +662,78 @@ textarea {
     margin-top: 0;
 }
 
-#edit-view .view-footer {
+/* ── New-card chooser modal ───────────────────────────────────────────────
+   Centered card with two primary actions ("Import from URL" / "Build from
+   scratch"), shown on top of whatever view is underneath. */
+
+.modal {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.5);
+    padding: 20px;
+}
+/* .modal's `display: flex` beats the browser's default `[hidden]{display:none}`
+   on specificity, so the modal wouldn't actually hide when we set the
+   attribute — force it back explicitly. */
+.modal[hidden] { display: none; }
+
+.modal-panel {
+    position: relative;
+    background: var(--bg);
+    border: 1px solid var(--white-10);
+    border-radius: 20px;
+    padding: 28px 24px;
+    max-width: 320px;
+    width: 100%;
     display: flex;
     flex-direction: column;
     gap: 12px;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
 }
 
-#edit-view .view-footer .form-actions {
-    margin: 0;
+.modal-panel h2 {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--fg);
+}
+
+.modal-panel > p {
+    font-size: 14px;
+    color: var(--white-70);
+    margin-bottom: 6px;
+}
+
+.modal-panel .btn {
+    width: 100%;
+}
+
+.modal-panel input {
+    width: 100%;
+    padding: 12px 14px;
+    font-size: 15px;
+    border-radius: 10px;
+    background: var(--white-05);
+    border: 1px solid var(--white-10);
+    color: var(--fg);
+    font-family: inherit;
+}
+
+.modal-close {
+    position: absolute;
+    top: 8px;
+    right: 12px;
+    background: transparent;
+    border: none;
+    color: var(--white-70);
+    font-size: 24px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 4px 8px;
 }
 
 .status-msg {

@@ -1327,7 +1327,7 @@ function generateDenseSVG(links) {
  */
 function getDemoLinks() {
     return [
-        { title: 'GitHub', url: 'https://github.com/planet-nine-app' },
+        { title: 'GitHub', url: 'https://github.com/freyja-love-and-magic' },
         { title: 'Planet Nine', url: 'https://planetnine.app' },
         { title: 'Documentation', url: 'https://docs.planetnine.app' },
         { title: 'Twitter', url: 'https://twitter.com/planetnine' },

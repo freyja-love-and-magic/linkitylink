@@ -14,7 +14,9 @@ use mobile::AppGroup;
 use desktop::AppGroup;
 
 /// Reads/writes one JSON-string value under `key` in the
-/// `group.freyja.idothis` App Group, shared between BizBuz and Linkitylink.
+/// `group.club.home.front` App Group, shared between BizBuz and Linkitylink.
+/// (The suite name lives in ios/Sources/AppGroupPlugin.swift and must match
+/// the entitlement build-ios.cjs patches in.)
 #[tauri::command]
 async fn write_value<R: Runtime>(app: tauri::AppHandle<R>, key: String, value: String) -> Result<(), String> {
     app.state::<AppGroup<R>>().write_value(key, value)
