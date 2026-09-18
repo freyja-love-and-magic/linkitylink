@@ -29,15 +29,16 @@ Three files, no framework or bundler:
 | `publish_card` | Renders the card to SVG server-side (in Rust) and publishes it to BDO under a per-card sessionless keypair |
 | `import_links` | Scrapes an external profile URL (Linktree gets a dedicated JSON-extraction parser; everything else falls back to a generic outbound-`<a>` scraper) and returns candidate links |
 | `get_or_create_referral_link` | Publishes (once per install) a static "invite a friend" SVG to its own BDO record and returns the permanent share URL |
-| `share_card_to_app_group` | Writes the active card's JSON into the shared iOS App Group under key `linkitylink.card`, so BizBuz can offer "Import from Linkitylink" |
+| `share_card_to_app_group` | Writes the chosen card's JSON into the shared iOS App Group under key `linkitylink.card`, so BizBuz can offer "Import from Linkitylink" |
+| `get_shared_card_id` | Id of the card currently in the App Group (or `None`), so the UI can badge which one sibling apps read |
 | `import_from_bizbuz` | Reads BizBuz's own shared profile (App Group key `bizbuz.profile`) and maps it into name/bio/photo/links |
 | `load_canonical_profile` / `save_canonical_profile` | The cross-app Canonical Profile (see below) |
 
-No server of its own — the app is a thin client over allyabase services, currently pointed at `https://allyabase-gateway-12345.netlify.app/`:
+No server of its own — the app is a thin client over allyabase services, currently pointed at `https://dev.8as.world/`:
 - **BDO** (`GATEWAY_BDO_URL`, `BDO_HASH = "linkitylink-card"`) — publishes each card as its own public record under its own per-card sessionless keypair (BDO's public storage is one slot per pubKey, so multi-card support requires one keypair per card, same pattern BizBuz uses).
 - **savage** (`SAVAGE_URL`) — the service that actually serves a published BDO's embedded `svg` field as a live webpage at a pre-signed URL; `share_url` is computed locally (timestamp + signature) the instant `publish_card` returns, no server round trip needed to know the URL.
 
-`GATEWAY_ENV = "test-12345"` namespaces the BDO uuid per card (`bdo_uuid_by_env`) and per referral link, so pointing the app at a different gateway later won't collide with what's already published.
+`GATEWAY_ENV = "dev-8as-world"` namespaces the BDO uuid per card (`bdo_uuid_by_env`) and per referral link, so pointing the app at a different gateway later won't collide with what's already published.
 
 ### Card lifecycle
 
@@ -48,10 +49,10 @@ No server of its own — the app is a thin client over allyabase services, curre
 
 ### Canonical Profile (shared across apps)
 
-A third, independent record — separate from `cards`/`cards.json` entirely — synced via the **`group.freyja.idothis`** iOS App Group, matching the pattern used by BizBuz, Gelder, Gettit, and Letemcook. Read/written through `tauri_plugin_app_group`'s `read_value_sync`/`write_value_sync` under the key `canonical.profile`. `save_canonical_profile` always carries forward whatever `address` is already stored (this app has no UI for it — Gettit does) rather than clobbering it with `None`, since every app that touches the record overwrites the whole thing on save. This logic is intentionally copy-pasted byte-for-byte across the sibling apps rather than shared as a library.
+A third, independent record — separate from `cards`/`cards.json` entirely — synced via the **`group.club.home.front`** iOS App Group, matching the pattern used by BizBuz, Gelder, Gettit, and Letemcook. Read/written through `tauri_plugin_app_group`'s `read_value_sync`/`write_value_sync` under the key `canonical.profile`. `save_canonical_profile` always carries forward whatever `address` is already stored (this app has no UI for it — Gettit does) rather than clobbering it with `None`, since every app that touches the record overwrites the whole thing on save. This logic is intentionally copy-pasted byte-for-byte across the sibling apps rather than shared as a library.
 
 Linkitylink additionally participates in two narrower, app-to-app (not group-wide) handoffs via the same App Group plugin, both one-directional:
-- `share_card_to_app_group` writes the currently-saved card to key `linkitylink.card` (BizBuz reads this for its own "Import from Linkitylink").
+- `share_card_to_app_group` writes one user-chosen card to key `linkitylink.card` (BizBuz reads this for its own "Import from Linkitylink"). The App Group holds exactly one Linkitylink card, so each call replaces whatever was shared before. This is a deliberate button tap on the card view, **not** an automatic sync on save — an earlier version did sync silently on every save, which meant the last-saved card became the shared one with no way for the user to see or choose that. The cards grid badges the shared card ("Shared"), backed by `get_shared_card_id`, and `delete_card` clears the shared record if it deletes the card that was in it (the plugin has no delete, so an empty string is the tombstone).
 - `import_from_bizbuz` reads BizBuz's own key, `bizbuz.profile`.
 
 ### Cross-promo
@@ -78,7 +79,7 @@ allyabase's own `CLAUDE.md` documents a wiki proxy alias `/plugin/allyabase/link
    - `TARGETED_DEVICE_FAMILY` restricted to iPhone only (the app's UI is a fixed phone-sized window, not designed for iPad, and building universal would also require iPad screenshots for App Store submission).
    - `ITSAppUsesNonExemptEncryption: false` — skips the encryption questionnaire on every upload (app only ever speaks HTTPS).
    - Real app icon (`src-tauri/icons/ios/*.png`) re-copied over `tauri ios init`'s stock icon, then every icon's alpha channel is flattened via `magick` (App Store rejects an alpha channel on the 1024×1024 marketing icon).
-   - App Group entitlement (`group.freyja.idothis`) rewritten into `linkitylink_iOS.entitlements`, which `tauri ios init` otherwise regenerates as an empty `<dict/>`.
+   - App Group entitlement (`group.club.home.front`) rewritten into `linkitylink_iOS.entitlements`, which `tauri ios init` otherwise regenerates as an empty `<dict/>`.
 3. `tauri ios build --export-method app-store-connect --build-number <n>`, with a manual `xcodebuild -exportArchive` fallback for a known Xcode 26 quirk where Tauri's export sometimes fails even though the archive built fine. Before attempting the manual fallback, the script checks the keychain for an actual Apple Distribution signing identity and bails loudly if only a Development identity is present (rather than silently producing a wrongly-signed IPA that fails at upload with a confusing error).
 4. Copies the resulting IPA to `app/builds/v{version}/{ProductName}-{buildNumber}.ipa`.
 
@@ -87,7 +88,7 @@ Upload to App Store Connect is a deliberately separate, manual step (Transporter
 ### Native plugins
 
 Two local Tauri plugins live under `app/src-tauri/`, both thin Swift/Rust wrappers with no business logic:
-- **`tauri-plugin-app-group`** — `read_value_sync`/`write_value_sync` against the shared iOS App Group `group.freyja.idothis` (UserDefaults-backed). Used for both the cross-app Canonical Profile and the narrower BizBuz handoff.
+- **`tauri-plugin-app-group`** — `read_value_sync`/`write_value_sync` against the shared iOS App Group `group.club.home.front` (UserDefaults-backed). Used for both the cross-app Canonical Profile and the narrower BizBuz handoff.
 - **`tauri-plugin-share-sheet`** — wraps `UIActivityViewController` so `share_text` can invoke the native iOS share sheet from JS (`plugin:share-sheet|share_text`). Linkitylink is the only sibling app observed with this plugin alongside `tauri-plugin-app-group`, since sharing a public link is core to what this app does (BizBuz/Gelder/etc. don't need a system share sheet for their primary flows the same way).
 
 `bdo-rs` (the Rust BDO client) is pulled by relative path from `allyabase/deployment/bdo/src/client/rust/bdo-rs` — this app's Cargo.toml assumes the sibling `allyabase` checkout exists at `../../../allyabase` relative to `app/src-tauri/`.

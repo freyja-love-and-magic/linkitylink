@@ -3,7 +3,7 @@ FROM node:22.14.0
 WORKDIR /usr/src/app
 
 # Clone linkitylink repo
-RUN git clone https://github.com/planet-nine-app/linkitylink.git
+RUN git clone https://github.com/freyja-love-and-magic/linkitylink.git
 
 # Install dependencies
 WORKDIR /usr/src/app/linkitylink
