@@ -10,9 +10,36 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::Manager;
 
-const GATEWAY_BDO_URL: &str = "https://allyabase-gateway-12345.netlify.app/bdo/";
-const SAVAGE_URL: &str = "https://allyabase-gateway-12345.netlify.app/savage/";
+// Path-based routing on the dev.8as.world droplet: nginx terminates TLS on
+// 443 and proxies /<service>/ to that service's local port (bdo → 3003).
+// One hostname, one certificate, everything over real HTTPS — which is also
+// what keeps iOS ATS happy, since the services themselves speak plain HTTP
+// and are not reachable directly from outside.
+const GATEWAY_BDO_URL: &str = "https://dev.8as.world/bdo/";
+// NOTE: nginx has no /savage/ route yet, so publishing works but the share
+// link this produces 404s until that route is added server-side.
+const SAVAGE_URL: &str = "https://dev.8as.world/savage/";
 const BDO_HASH: &str = "linkitylink-card";
+
+// ── Palette ──────────────────────────────────────────────────────────────────
+//
+// HomeVentory light mode, matching the app UI in style.css. render_card_svg
+// and render_referral_svg each carried their own copy of the pre-HomeVentory
+// dark scheme (#0a001a / #10b981 / #a78bfa), so a published card looked like
+// a different product from the app that made it.
+//
+// PALETTE_* is also sent to savage on publish (see publish_card), which themes
+// the page chrome around the card. Without it savage falls back to BizBuz's
+// old colours for every app it serves.
+const PALETTE_BG: &str = "#F7F9FA";        // glacier white
+const PALETTE_GREEN: &str = "#2E5E4E";     // deep evergreen
+const PALETTE_GREEN_DARK: &str = "#1F4A3E";
+const PALETTE_ACCENT: &str = "#4FA3F7";    // signal blue
+/// Midnight slate (#1F2933) as rgb components. The published SVGs need the ink
+/// colour at several opacities, and a Rust raw string can't carry an inline
+/// hex literal (`r#"..."#` terminates at the first `"#`), so these are
+/// interpolated as rgba(...) rather than written as hex.
+const PALETTE_INK_RGB: &str = "31,41,51";
 const MAX_CARDS: usize = 4;
 
 // BDO mints its own server-side uuid on create_user, distinct from the local
@@ -20,67 +47,17 @@ const MAX_CARDS: usize = 4;
 // another, so both a card's publish record and the referral link are stored
 // per-env (keyed by this const) rather than as a single value. Bump this
 // whenever GATEWAY_BDO_URL points at a genuinely different BDO deployment.
-const GATEWAY_ENV: &str = "test-12345";
+const GATEWAY_ENV: &str = "dev-8as-world";
 const MAX_LINKS: usize = 16;
 // Bounds a pathological generic-fallback page's raw scrape output; the real
 // user-facing cap is MAX_LINKS, enforced at merge time in the JS import handler.
 const IMPORT_SCRAPE_CAP: usize = 40;
 
-// ── Categories ───────────────────────────────────────────────────────────────
-//
-// Same slug/label list as idothis's own CATEGORIES (and bizbuz's copy) —
-// kept as its own copy here rather than a shared crate, matching this
-// ecosystem's existing per-app-copy convention. Keep in sync by hand if
-// either list changes.
-
-const CATEGORIES: &[(&str, &str)] = &[
-    ("plumber", "Plumber"),
-    ("electrician", "Electrician"),
-    ("house_cleaner", "House Cleaner"),
-    ("caterer", "Caterer"),
-    ("restauranteur", "Restauranteur"),
-    ("chef", "Chef"),
-    ("food_cart", "Food Cart"),
-    ("handyman", "Handyman"),
-    ("landscaper", "Landscaper"),
-    ("painter", "Painter"),
-    ("carpenter", "Carpenter"),
-    ("hvac_technician", "HVAC Technician"),
-    ("photographer", "Photographer"),
-    ("videographer", "Videographer"),
-    ("hair_stylist", "Hair Stylist"),
-    ("barber", "Barber"),
-    ("massage_therapist", "Massage Therapist"),
-    ("personal_trainer", "Personal Trainer"),
-    ("tutor", "Tutor"),
-    ("pet_groomer", "Pet Groomer"),
-    ("dog_walker", "Dog Walker"),
-    ("auto_mechanic", "Auto Mechanic"),
-    ("mover", "Moving Services"),
-    ("interior_designer", "Interior Designer"),
-    ("web_developer", "Web Developer"),
-    ("graphic_designer", "Graphic Designer"),
-    ("accountant", "Accountant"),
-    ("event_planner", "Event Planner"),
-    ("dj_musician", "DJ / Musician"),
-    ("baker", "Baker"),
-    ("florist", "Florist"),
-    ("tailor", "Tailor / Seamstress"),
-];
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Category {
-    pub slug: String,
-    pub label: String,
-}
-
-#[tauri::command]
-async fn get_categories() -> Result<Vec<Category>, String> {
-    Ok(CATEGORIES
-        .iter()
-        .map(|(slug, label)| Category { slug: slug.to_string(), label: label.to_string() })
-        .collect())
-}
+// Categories used to live here (per-app copy of idothis's taxonomy) and
+// drove a Food & Drink cross-promo prompt for letemcook. Both have moved
+// to the shared Canonical Profile — idothis is now the sole owner of the
+// category taxonomy, and Linkitylink no longer has a `category` field on
+// its cards.
 
 // ── Data types ───────────────────────────────────────────────────────────────
 
@@ -108,12 +85,6 @@ pub struct LinkCard {
     pub photo: Option<String>,
     #[serde(default)]
     pub links: Vec<LinkEntry>,
-    /// Coarse business-type tag, e.g. `"food"` for Food & Drink. Deliberately
-    /// narrow for now (see wiring to the letemcook cross-promo prompt in the
-    /// frontend) — `#[serde(default)]` so cards saved before this field
-    /// existed still deserialize.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub category: Option<String>,
     /// BDO identity uuid this card is published under, per environment
     /// (see `GATEWAY_ENV`) — a fresh env has no entry until first publish.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
@@ -479,8 +450,8 @@ fn readable_icon_fill(hex: &str) -> &'static str {
 /// a loop over a variable-length list instead of a fixed set of fields.
 fn render_card_svg(card: &LinkCard) -> String {
     const WIDTH: u32 = 400;
-    const BG: &str = "#0a001a";
-    const GREEN: &str = "#10b981";
+    const BG: &str = PALETTE_BG;
+    const GREEN: &str = PALETTE_GREEN;
     const ROW_HEIGHT: u32 = 56;
 
     let name = card.name.clone().unwrap_or_else(|| "".to_string());
@@ -520,9 +491,14 @@ fn render_card_svg(card: &LinkCard) -> String {
     if let Some(bio) = card.bio.as_deref().filter(|s| !s.is_empty()) {
         y += 34;
         let lines = wrap_text(bio, 42, 3);
-        for line in &lines {
+        // Quotes wrap the whole bio, not each line. Every line used to get its
+        // own pair, so a two-line bio read as two separate quotations.
+        let last = lines.len().saturating_sub(1);
+        for (i, line) in lines.iter().enumerate() {
+            let open = if i == 0 { "\u{201C}" } else { "" };
+            let close = if i == last { "\u{201D}" } else { "" };
             body.push_str(&format!(
-                r#"<text x="{cx}" y="{y}" font-family="sans-serif" font-style="italic" font-size="12" fill="rgba(255,255,255,0.7)" text-anchor="middle">"{}"</text>
+                r#"<text x="{cx}" y="{y}" font-family="sans-serif" font-style="italic" font-size="12" fill="rgba({PALETTE_INK_RGB},0.7)" text-anchor="middle">{open}{}{close}</text>
 "#,
                 escape_xml(line),
             ));
@@ -571,7 +547,7 @@ fn render_card_svg(card: &LinkCard) -> String {
         let display_label = truncate_label(&label, max_label_chars);
 
         body.push_str(&format!(
-            r#"<a href="{}"><rect x="{row_x}" y="{y}" width="{row_width}" height="{}" rx="12" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.1)"/>{icon_svg}<text x="{label_x}" y="{text_y}" font-family="sans-serif" font-size="15" font-weight="600" fill="white">{}</text><text x="{}" y="{text_y}" font-family="sans-serif" font-size="15" fill="{GREEN}" text-anchor="end">&#8594;</text></a>
+            r#"<a href="{}"><rect x="{row_x}" y="{y}" width="{row_width}" height="{}" rx="12" fill="rgba({PALETTE_INK_RGB},0.04)" stroke="rgba({PALETTE_INK_RGB},0.12)"/>{icon_svg}<text x="{label_x}" y="{text_y}" font-family="sans-serif" font-size="15" font-weight="600" fill="rgba({PALETTE_INK_RGB},0.92)">{}</text><text x="{}" y="{text_y}" font-family="sans-serif" font-size="15" fill="{GREEN}" text-anchor="end">&#8594;</text></a>
 "#,
             escape_xml(&href),
             ROW_HEIGHT - 12,
@@ -583,7 +559,7 @@ fn render_card_svg(card: &LinkCard) -> String {
 
     y += 12;
     body.push_str(&format!(
-        r#"<text x="{cx}" y="{y}" font-family="sans-serif" font-size="11" fill="rgba(255,255,255,0.4)" text-anchor="middle">a Freyja offering</text>
+        r#"<text x="{cx}" y="{y}" font-family="sans-serif" font-size="11" fill="rgba({PALETTE_INK_RGB},0.4)" text-anchor="middle">a Freyja offering</text>
 "#
     ));
 
@@ -810,7 +786,15 @@ async fn save_card(app: tauri::AppHandle, mut card: LinkCard) -> Result<LinkCard
 async fn delete_card(app: tauri::AppHandle, id: String) -> Result<(), String> {
     let mut store = read_cards(&app)?;
     store.cards.retain(|c| c.id != id);
-    write_cards(&app, &store)
+    write_cards(&app, &store)?;
+
+    // If this was the card shared with sibling apps, stop sharing it —
+    // otherwise BizBuz keeps importing a card that no longer exists here,
+    // and the card list's "Shared" badge has nothing left to point at.
+    if get_shared_card_id(app.clone()).await? == Some(id) {
+        clear_shared_card(&app)?;
+    }
+    Ok(())
 }
 
 /// Publishes (or re-publishes, pushing edits) a card to BDO, embedding a
@@ -831,10 +815,24 @@ async fn publish_card(app: tauri::AppHandle, card_id: String) -> Result<LinkCard
 
     let svg = render_card_svg(&store.cards[index]);
     let mut card_json = serde_json::to_value(&store.cards[index]).map_err(|e| e.to_string())?;
-    card_json
+    let card_obj = card_json
         .as_object_mut()
-        .ok_or_else(|| "card serialized to non-object".to_string())?
-        .insert("svg".to_string(), serde_json::Value::String(svg));
+        .ok_or_else(|| "card serialized to non-object".to_string())?;
+    card_obj.insert("svg".to_string(), serde_json::Value::String(svg));
+
+    // Themes savage's page chrome — the ground behind the card and the button
+    // — to match the card. Without this savage falls back to BizBuz's old
+    // colours and the card sits on a near-black page with a bright green
+    // button. savage accepts only literal hex and ignores anything else,
+    // since these land in a style attribute on a script-free page.
+    card_obj.insert(
+        "palette".to_string(),
+        serde_json::json!({
+            "background": PALETTE_BG,
+            "accent": PALETTE_GREEN,
+            "accentText": PALETTE_BG,
+        }),
+    );
 
     let existing_uuid = store.cards[index].bdo_uuid_by_env.get(GATEWAY_ENV).cloned();
 
@@ -922,9 +920,9 @@ fn write_referral_links(app: &tauri::AppHandle, links: &HashMap<String, Referral
 fn render_referral_svg(app_store_url: &str) -> String {
     const WIDTH: u32 = 400;
     const HEIGHT: u32 = 440;
-    const BG: &str = "#0a001a";
-    const GREEN: &str = "#10b981";
-    const PURPLE: &str = "#a78bfa";
+    const BG: &str = PALETTE_BG;
+    const GREEN: &str = PALETTE_GREEN;
+    const PURPLE: &str = PALETTE_ACCENT;
 
     let cx = WIDTH / 2;
     let button_y: u32 = 300;
@@ -936,10 +934,10 @@ fn render_referral_svg(app_store_url: &str) -> String {
 <rect x="{}" y="90" width="90" height="50" rx="25" fill="none" stroke="url(#markGradient)" stroke-width="10"/>
 <rect x="{}" y="115" width="90" height="50" rx="25" fill="none" stroke="url(#markGradient)" stroke-width="10"/>
 <text x="{cx}" y="210" font-family="sans-serif" font-size="30" font-weight="bold" fill="url(#markGradient)" text-anchor="middle">Linkitylink</text>
-<text x="{cx}" y="240" font-family="sans-serif" font-size="14" fill="rgba(255,255,255,0.7)" text-anchor="middle">All your links, one shareable page.</text>
+<text x="{cx}" y="240" font-family="sans-serif" font-size="14" fill="rgba({PALETTE_INK_RGB},0.7)" text-anchor="middle">All your links, one shareable page.</text>
 <text x="{cx}" y="270" font-family="sans-serif" font-size="14" fill="{PURPLE}" text-anchor="middle">You've been invited to try it out.</text>
 <a href="{}"><rect x="{}" y="{button_y}" width="260" height="56" rx="16" fill="{GREEN}"/><text x="{cx}" y="{}" font-family="sans-serif" font-size="18" font-weight="bold" fill="{BG}" text-anchor="middle">Get Linkitylink</text></a>
-<text x="{cx}" y="400" font-family="sans-serif" font-size="11" fill="rgba(255,255,255,0.4)" text-anchor="middle">a Freyja offering</text>
+<text x="{cx}" y="400" font-family="sans-serif" font-size="11" fill="rgba({PALETTE_INK_RGB},0.4)" text-anchor="middle">a Freyja offering</text>
 </svg>"#,
         cx - 110,
         cx + 20,
@@ -1040,6 +1038,20 @@ async fn import_links(url: String) -> Result<Vec<LinkEntry>, String> {
 }
 
 // ── App Group sharing ───────────────────────────────────────────────────────
+//
+// The App Group holds exactly ONE Linkitylink card, under the fixed key
+// `linkitylink.card` — that's the single record BizBuz's "Import from
+// Linkitylink" reads. So `card_id` here picks which of the user's local
+// cards to expose, and every call replaces whatever was shared before.
+//
+// This is deliberately a user action (a button on the card view), not an
+// automatic sync on save: with up to MAX_CARDS cards, silently sharing
+// whichever one happened to be saved last gives the user no say in — and no
+// way to see — what sibling apps are reading. `get_shared_card_id` below is
+// what lets the UI show which card is currently the shared one.
+
+/// The key under which this app's one shared card lives in the App Group.
+const SHARED_CARD_KEY: &str = "linkitylink.card";
 
 #[tauri::command]
 async fn share_card_to_app_group(app: tauri::AppHandle, card_id: String) -> Result<(), String> {
@@ -1050,7 +1062,31 @@ async fn share_card_to_app_group(app: tauri::AppHandle, card_id: String) -> Resu
         .find(|c| c.id == card_id)
         .ok_or_else(|| "Card not found".to_string())?;
     let json = serde_json::to_string(card).map_err(|e| e.to_string())?;
-    tauri_plugin_app_group::write_value_sync(&app, "linkitylink.card", &json)
+    tauri_plugin_app_group::write_value_sync(&app, SHARED_CARD_KEY, &json)
+}
+
+/// Id of the card currently shared with sibling apps, or `None` if nothing
+/// is shared yet. Parsed as a loose `Value` rather than a `LinkCard` because
+/// all this needs is the id, and a record written by a newer build of the
+/// app shouldn't make it fail — same version-skew tolerance as the
+/// `BizbuzProfileMirror` below. An empty string is the tombstone written by
+/// `clear_shared_card` (the plugin can write but not delete), and parses to
+/// `None` here.
+#[tauri::command]
+async fn get_shared_card_id(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let Some(raw) = tauri_plugin_app_group::read_value_sync(&app, SHARED_CARD_KEY)? else {
+        return Ok(None);
+    };
+    Ok(serde_json::from_str::<serde_json::Value>(&raw)
+        .ok()
+        .and_then(|v| v.get("id").and_then(|id| id.as_str()).map(str::to_string))
+        .filter(|id| !id.is_empty()))
+}
+
+/// Stops sharing whatever card is in the App Group. The plugin has no
+/// delete, so an empty string stands in as a tombstone.
+fn clear_shared_card(app: &tauri::AppHandle) -> Result<(), String> {
+    tauri_plugin_app_group::write_value_sync(app, SHARED_CARD_KEY, "")
 }
 
 /// Permissive mirror of BizBuz's `Profile`/`Social` — every field
@@ -1149,7 +1185,7 @@ async fn import_from_bizbuz(app: tauri::AppHandle) -> Result<ImportFromBizbuzRes
 //
 // A third, independent record — separate from this app's own LinkCard —
 // holding "all of the user's information" in one place, shared verbatim
-// across every app in group.freyja.idothis via the App Group plugin. Not
+// across every app in group.club.home.front via the App Group plugin. Not
 // wired into save_card/publish_card in any way; editing it never touches
 // link_card.json.
 
@@ -1189,6 +1225,17 @@ pub struct CanonicalProfile {
     pub fields: Vec<CanonicalField>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub address: Option<Address>,
+    /// idothis-owned. Present here only so linkitylink round-trips it
+    /// unchanged on save. None = don't touch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idothis_categories: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_zip: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idothis_rate_cents: Option<u64>,
+    /// getpayed-owned. Present here so linkitylink round-trips it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stripe_connected: Option<bool>,
     pub updated_at: Option<String>,
 }
 
@@ -1223,10 +1270,17 @@ async fn load_canonical_profile(app: tauri::AppHandle) -> Result<Option<Canonica
 
 #[tauri::command]
 async fn save_canonical_profile(app: tauri::AppHandle, mut profile: CanonicalProfile) -> Result<CanonicalProfile, String> {
-    // This app's own form never sends a real address (no UI for it — see
-    // Address's doc comment above), so always carry forward whatever's
-    // already stored rather than overwriting it with the incoming None.
-    profile.address = load_canonical_profile(app.clone()).await?.and_then(|p| p.address);
+    // This app's own form never sends real values for address / idothis
+    // fields / stripe status, so always carry forward whatever's already
+    // stored rather than overwriting them with the incoming None.
+    let existing = load_canonical_profile(app.clone()).await?;
+    if let Some(existing) = existing {
+        if profile.address.is_none() { profile.address = existing.address; }
+        if profile.idothis_categories.is_none() { profile.idothis_categories = existing.idothis_categories; }
+        if profile.service_zip.is_none() { profile.service_zip = existing.service_zip; }
+        if profile.idothis_rate_cents.is_none() { profile.idothis_rate_cents = existing.idothis_rate_cents; }
+        if profile.stripe_connected.is_none() { profile.stripe_connected = existing.stripe_connected; }
+    }
 
     let mut deduped: Vec<CanonicalField> = Vec::new();
     for mut field in profile.fields.into_iter() {
@@ -1258,7 +1312,6 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
-            get_categories,
             load_cards,
             save_card,
             delete_card,
@@ -1266,10 +1319,55 @@ pub fn run() {
             import_links,
             get_or_create_referral_link,
             share_card_to_app_group,
+            get_shared_card_id,
             import_from_bizbuz,
             load_canonical_profile,
             save_canonical_profile
         ])
         .run(tauri::generate_context!())
         .expect("error while running linkitylink");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Renders a fully-populated card and writes it out, so the published SVG
+    /// can be looked at rather than reasoned about. Colour changes especially
+    /// are not reviewable by reading hex constants — the text fills were
+    /// white-on-dark, and flipping the ground to glacier white without
+    /// flipping them would ship an invisible card.
+    ///
+    ///   cargo test render_sample -- --nocapture
+    ///   rsvg-convert -w 400 /tmp/linkitylink-card-sample.svg -o /tmp/card.png
+    #[test]
+    fn render_sample_card() {
+        let card = LinkCard {
+            id: "sample".into(),
+            name: Some("Ada Lovelace".into()),
+            bio: Some("Analytical engines, mostly. Occasionally poetry.".into()),
+            photo: None,
+            links: vec![
+                LinkEntry { id: "1".into(), label: "Portfolio".into(), url: "https://example.com".into() },
+                LinkEntry { id: "2".into(), label: "GitHub".into(), url: "https://github.com/ada".into() },
+                LinkEntry { id: "3".into(), label: "Instagram".into(), url: "https://instagram.com/ada".into() },
+            ],
+            ..Default::default()
+        };
+
+        let svg = render_card_svg(&card);
+        std::fs::write("/tmp/linkitylink-card-sample.svg", &svg).unwrap();
+
+        assert!(!svg.contains("rgba(255,255,255"), "white text on a light card");
+        assert!(svg.contains(PALETTE_BG), "card ground should use the palette");
+        println!("wrote /tmp/linkitylink-card-sample.svg ({} bytes)", svg.len());
+    }
+
+    #[test]
+    fn render_sample_referral() {
+        let svg = render_referral_svg(APP_STORE_URL);
+        std::fs::write("/tmp/linkitylink-referral-sample.svg", &svg).unwrap();
+        assert!(!svg.contains("rgba(255,255,255"), "white text on a light card");
+        println!("wrote /tmp/linkitylink-referral-sample.svg ({} bytes)", svg.len());
+    }
 }
