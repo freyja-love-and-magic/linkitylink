@@ -1,6 +1,6 @@
 name: linkitylink
 options:
-  bundleIdPrefix: com.freyja.linkitylink
+  bundleIdPrefix: club.home.linkitylink
   deploymentTarget:
     iOS: 15.0
 fileGroups: [../../src]
@@ -11,8 +11,8 @@ settingGroups:
   app:
     base:
       PRODUCT_NAME: Linkitylink
-      PRODUCT_BUNDLE_IDENTIFIER: com.freyja.linkitylink
-      DEVELOPMENT_TEAM: RLJ2FY35FD
+      PRODUCT_BUNDLE_IDENTIFIER: club.home.linkitylink
+      DEVELOPMENT_TEAM: PCUFMY9NKZ
 targetTemplates:
   app:
     type: application
