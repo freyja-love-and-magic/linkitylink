@@ -2,7 +2,7 @@
 name = "linkitylink"
 version = "0.1.0"
 description = "Linkitylink — one link card, shared anywhere"
-authors = ["Planet Nine"]
+authors = ["Freyja - Love and Magic"]
 edition = "2021"
 
 [lib]

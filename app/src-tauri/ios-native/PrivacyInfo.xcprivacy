@@ -2,12 +2,111 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- No tracking. Apple defines tracking as linking data from this app with
+	     Third-Party Data for targeted advertising or advertising measurement,
+	     or sharing it with a data broker. Linkitylink does neither: no
+	     analytics SDK, no ad SDK, nothing shared with third parties. The app
+	     therefore needs no ATT prompt. -->
 	<key>NSPrivacyTracking</key>
 	<false/>
 	<key>NSPrivacyTrackingDomains</key>
 	<array/>
+
+	<!-- ── What leaves the device ───────────────────────────────────────────
+	     Publishing a card transmits it to a BDO server that stores it in
+	     readable form indefinitely. Apple's test for "collect" is transmission
+	     plus retention beyond servicing the request in real time — NOT whether
+	     the developer ever reads it. We never read it; it is still collection,
+	     and an empty array here would be a false declaration.
+
+	     The optional-disclosure carve-out does not apply. It requires all four
+	     of its criteria, and the third — "collection occurs only in infrequent
+	     cases that are not part of the app's primary functionality" — fails,
+	     since publishing a link card IS the primary functionality.
+
+	     NOT declared, deliberately:
+	       - Cards that have never been published. They live only in local
+	         cards.json and nothing is transmitted.
+	       - The cross-app Canonical Profile. App Group storage is on-device;
+	         sharing between our own apps on one phone is not collection.
+	       - Any analytics or diagnostics. There are none. -->
 	<key>NSPrivacyCollectedDataTypes</key>
-	<array/>
+	<array>
+		<!-- LinkCard.name -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeName</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+
+		<!-- LinkCard.photo — a base64 JPEG, embedded in the published SVG. -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypePhotosOrVideos</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+
+		<!-- LinkCard.bio, and each LinkEntry's label — free text the user
+		     writes. -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeOtherUserContent</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+
+		<!-- Each LinkEntry.url. These are the user's own social and web
+		     presences — Instagram, GitHub, a portfolio — so they identify and
+		     route to the person the same way a contact method does. -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeOtherUserContactInfo</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+
+		<!-- LinkCard.id and the BDO-assigned uuid in bdoUuidByEnv, which
+		     identify the published record. -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeUserID</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+	</array>
+
 	<key>NSPrivacyAccessedAPITypes</key>
 	<array>
 		<dict>
@@ -15,17 +114,20 @@
 			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
 			<key>NSPrivacyAccessedAPITypeReasons</key>
 			<array>
-				<!-- TODO before first TestFlight upload with App Group sharing:
-				     tauri-plugin-app-group/ios/Sources/AppGroupPlugin.swift reads/
-				     writes UserDefaults(suiteName: "group.freyja.idothis"), shared
-				     with BizBuz. Look up the current correct Required Reason API
-				     code for App-Group-scoped UserDefaults access on Apple's
-				     published Privacy Manifest Files docs rather than guessing
-				     here, then add it as a <string> entry in this array (mirrors
-				     the same TODO in bizbuz/app/src-tauri/ios-native/PrivacyInfo.xcprivacy).
-				     This only affects the App Store Connect privacy report at
-				     upload time, not the build itself, so it's safe to leave open
-				     until then. -->
+				<!-- 1C8F.1: information accessible only to apps, app
+				     extensions, and App Clips in the SAME App Group.
+				     tauri-plugin-app-group/ios/Sources/AppGroupPlugin.swift
+				     reads and writes UserDefaults(suiteName:
+				     "group.club.home.front") — the cross-app Canonical Profile
+				     and the Linkitylink <-> BizBuz card handoff.
+				     Omitting this is what triggers ITMS-91053 on upload.
+
+				     CA92.1 (same-app-only access) is deliberately NOT
+				     declared: unlike BizBuz, Linkitylink has no Quick Actions
+				     bridge and touches UserDefaults only through the App
+				     Group plugin. Declaring a reason the app doesn't use is
+				     its own kind of inaccuracy. -->
+				<string>1C8F.1</string>
 			</array>
 		</dict>
 	</array>
