@@ -8,20 +8,6 @@ const MAX_CARDS = 4;
 // MAX_PROFILE_FIELDS in src-tauri/src/lib.rs.
 const MAX_PROFILE_FIELDS = 20;
 
-// Populated at init from the Rust-side CATEGORIES list (get_categories) —
-// shared with idothis's/bizbuz's own taxonomy, see lib.rs. slug -> label.
-let categories = [];
-let categoryLabels = {};
-
-// Same food-related slugs idothis/bizbuz prompt on — keep in sync with
-// lib.rs's CATEGORIES if that list's food entries ever change.
-const FOOD_CATEGORY_SLUGS = ['caterer', 'restauranteur', 'chef', 'food_cart', 'baker'];
-
-// localStorage key for the set of card ids already offered the letemcook
-// cross-promo prompt, so re-saving a food card never re-nags. Prompted
-// once ever per card id, the first time a save lands with category 'food'.
-const LETEMCOOK_PROMPTED_KEY = 'linkitylink.letemcookPromptedCardIds';
-
 const cardsView = document.getElementById('cards-view');
 const editView = document.getElementById('edit-view');
 const cardView = document.getElementById('card-view');
@@ -38,15 +24,22 @@ const newLinkUrl = document.getElementById('new-link-url');
 const addLinkBtn = document.getElementById('add-link-btn');
 const linkLimitHint = document.getElementById('link-limit-hint');
 linkLimitHint.textContent = `Up to ${MAX_LINKS} links — remove one to add another.`;
-const importUrlInput = document.getElementById('import-url');
-const importLinksBtn = document.getElementById('import-links-btn');
 const importBizbuzBtn = document.getElementById('import-bizbuz-btn');
+const socialsGrid = document.getElementById('socials-grid');
+const cardSocialsEl = document.getElementById('card-socials');
+const urlImportModal = document.getElementById('url-import-modal');
+const urlImportInput = document.getElementById('url-import-input');
+const urlImportSubmitBtn = document.getElementById('url-import-submit-btn');
+const urlImportCancelBtn = document.getElementById('url-import-cancel-btn');
 const publishBtn = document.getElementById('publish-btn');
 const linkRow = document.getElementById('link-row');
 const linkText = document.getElementById('link-text');
 const copyLinkBtn = document.getElementById('copy-link-btn');
 const shareBtn = document.getElementById('share-btn');
+const shareAppGroupBtn = document.getElementById('share-app-group-btn');
+const shareAppGroupHint = document.getElementById('share-app-group-hint');
 const referralShareBtn = document.getElementById('referral-share-btn');
+const resetAllBtn = document.getElementById('reset-all-btn');
 const profileNavBtn = document.getElementById('profile-nav-btn');
 const backToCardsBtn = document.getElementById('back-to-cards-btn');
 const profileView = document.getElementById('profile-view');
@@ -60,6 +53,10 @@ const profileNewFieldValue = document.getElementById('profile-new-field-value');
 const profileAddFieldBtn = document.getElementById('profile-add-field-btn');
 const profileFieldLimitHint = document.getElementById('profile-field-limit-hint');
 const profileCloseBtn = document.getElementById('profile-close-btn');
+const chooserModal = document.getElementById('new-card-chooser');
+const chooserImportBtn = document.getElementById('chooser-import-btn');
+const chooserBuildBtn = document.getElementById('chooser-build-btn');
+const chooserCancelBtn = document.getElementById('chooser-cancel-btn');
 
 const PHOTO_SIZE = 480;
 const PHOTO_QUALITY = 0.85;
@@ -67,9 +64,92 @@ const PHOTO_QUALITY = 0.85;
 let cards = [];
 let activeCard = null; // the card shown in card-view / being edited in edit-view (null = creating new)
 let pendingPhoto = null; // base64 JPEG (no data: prefix), staged from the picker until Save
-let pendingLinks = []; // working link-entry array while the edit form is open
+let pendingLinks = []; // working NON-social link-entry array while the edit form is open — socials live in pendingSocials, merged in cardFromForm
+let pendingSocials = {}; // slug -> username, staged from the socials grid; extracted from card.links on load, merged back on save
+let expandedSocial = null; // slug of the currently-open disclosure, or null
 let deleteArmed = false;
 let deleteArmedTimeout = null;
+// Id of the card currently in the App Group (the one BizBuz imports), or
+// null if nothing is shared. Mirrors get_shared_card_id in Rust — kept in
+// memory so the cards grid and card view can both show it without a round
+// trip on every render.
+let sharedCardId = null;
+
+// Socials icon grid — same 8 platforms as BizBuz. SVG paths from Simple
+// Icons (via the PLATFORMS array below). Codeberg uses a letter monogram
+// since it's not in Simple Icons. Users tap an icon, enter their handle,
+// and the entry is upserted into the card's link list (with the platform's
+// standard URL template).
+const SOCIALS = [
+    { slug: 'instagram', label: 'Instagram', hex: '#E4405F', viewBox: 24,
+      path: 'M7.0301.084c-1.2768.0602-2.1487.264-2.911.5634-.7888.3075-1.4575.72-2.1228 1.3877-.6652.6677-1.075 1.3368-1.3802 2.127-.2954.7638-.4956 1.6365-.552 2.914-.0564 1.2775-.0689 1.6882-.0626 4.947.0062 3.2586.0206 3.6671.0825 4.9473.061 1.2765.264 2.1482.5635 2.9107.308.7889.72 1.4573 1.388 2.1228.6679.6655 1.3365 1.0743 2.1285 1.38.7632.295 1.6361.4961 2.9134.552 1.2773.056 1.6884.069 4.9462.0627 3.2578-.0062 3.668-.0207 4.9478-.0814 1.28-.0607 2.147-.2652 2.9098-.5633.7889-.3086 1.4578-.72 2.1228-1.3881.665-.6682 1.0745-1.3378 1.3795-2.1284.2957-.7632.4966-1.636.552-2.9124.056-1.2809.0692-1.6898.063-4.948-.0063-3.2583-.021-3.6668-.0817-4.9465-.0607-1.2797-.264-2.1487-.5633-2.9117-.3084-.7889-.72-1.4568-1.3876-2.1228C21.2982 1.33 20.628.9208 19.8378.6165 19.074.321 18.2017.1197 16.9244.0645 15.6471.0093 15.236-.005 11.977.0014 8.718.0076 8.31.0215 7.0301.0839m.1402 21.6932c-1.17-.0509-1.8053-.2453-2.2287-.408-.5606-.216-.96-.4771-1.3819-.895-.422-.4178-.6811-.8186-.9-1.378-.1644-.4234-.3624-1.058-.4171-2.228-.0595-1.2645-.072-1.6442-.079-4.848-.007-3.2037.0053-3.583.0607-4.848.05-1.169.2456-1.805.408-2.2282.216-.5613.4762-.96.895-1.3816.4188-.4217.8184-.6814 1.3783-.9003.423-.1651 1.0575-.3614 2.227-.4171 1.2655-.06 1.6447-.072 4.848-.079 3.2033-.007 3.5835.005 4.8495.0608 1.169.0508 1.8053.2445 2.228.408.5608.216.96.4754 1.3816.895.4217.4194.6816.8176.9005 1.3787.1653.4217.3617 1.056.4169 2.2263.0602 1.2655.0739 1.645.0796 4.848.0058 3.203-.0055 3.5834-.061 4.848-.051 1.17-.245 1.8055-.408 2.2294-.216.5604-.4763.96-.8954 1.3814-.419.4215-.8181.6811-1.3783.9-.4224.1649-1.0577.3617-2.2262.4174-1.2656.0595-1.6448.072-4.8493.079-3.2045.007-3.5825-.006-4.848-.0608M16.953 5.5864A1.44 1.44 0 1 0 18.39 4.144a1.44 1.44 0 0 0-1.437 1.4424M5.8385 12.012c.0067 3.4032 2.7706 6.1557 6.173 6.1493 3.4026-.0065 6.157-2.7701 6.1506-6.1733-.0065-3.4032-2.771-6.1565-6.174-6.1498-3.403.0067-6.156 2.771-6.1496 6.1738M8 12.0077a4 4 0 1 1 4.008 3.9921A3.9996 3.9996 0 0 1 8 12.0077' },
+    { slug: 'x', label: 'X', hex: '#000000', viewBox: 24,
+      path: 'M14.234 10.162 22.977 0h-2.072l-7.591 8.824L7.251 0H.258l9.168 13.343L.258 24H2.33l8.016-9.318L16.749 24h6.993zm-2.837 3.299-.929-1.329L3.076 1.56h3.182l5.965 8.532.929 1.329 7.754 11.09h-3.182z' },
+    { slug: 'tiktok', label: 'TikTok', hex: '#000000', viewBox: 24,
+      path: 'M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z' },
+    { slug: 'youtube', label: 'YouTube', hex: '#FF0000', viewBox: 24,
+      path: 'M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z' },
+    { slug: 'facebook', label: 'Facebook', hex: '#0866FF', viewBox: 24,
+      path: 'M9.101 23.691v-7.98H6.627v-3.667h2.474v-1.58c0-4.085 1.848-5.978 5.858-5.978.401 0 .955.042 1.468.103a8.68 8.68 0 0 1 1.141.195v3.325a8.623 8.623 0 0 0-.653-.036 26.805 26.805 0 0 0-.733-.009c-.707 0-1.259.096-1.675.309a1.686 1.686 0 0 0-.679.622c-.258.42-.374.995-.374 1.752v1.297h3.919l-.386 2.103-.287 1.564h-3.246v8.245C19.396 23.238 24 18.179 24 12.044c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.628 3.874 10.35 9.101 11.647Z' },
+    { slug: 'linkedin', label: 'LinkedIn', hex: '#0A66C2', viewBox: 448,
+      path: 'M416 32L31.9 32C14.3 32 0 46.5 0 64.3L0 447.7C0 465.5 14.3 480 31.9 480L416 480c17.6 0 32-14.5 32-32.3l0-383.4C448 46.5 433.6 32 416 32zM135.4 416l-66.4 0 0-213.8 66.5 0 0 213.8-.1 0zM102.2 96a38.5 38.5 0 1 1 0 77 38.5 38.5 0 1 1 0-77zM384.3 416l-66.4 0 0-104c0-24.8-.5-56.7-34.5-56.7-34.6 0-39.9 27-39.9 54.9l0 105.8-66.4 0 0-213.8 63.7 0 0 29.2 .9 0c8.9-16.8 30.6-34.5 62.9-34.5 67.2 0 79.7 44.3 79.7 101.9l0 117.2z' },
+    { slug: 'github', label: 'GitHub', hex: '#181717', viewBox: 24,
+      path: 'M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12' },
+    { slug: 'codeberg', label: 'Codeberg', hex: '#2185D0', viewBox: 24, letter: 'C' },
+];
+
+function socialUrlFor(slug, handle) {
+    switch (slug) {
+        case 'instagram': return `https://instagram.com/${encodeURIComponent(handle)}`;
+        case 'x':         return `https://x.com/${encodeURIComponent(handle)}`;
+        case 'tiktok':    return `https://tiktok.com/@${encodeURIComponent(handle)}`;
+        case 'youtube':   return `https://youtube.com/@${encodeURIComponent(handle)}`;
+        case 'facebook':  return `https://facebook.com/${encodeURIComponent(handle)}`;
+        case 'linkedin':  return `https://linkedin.com/in/${encodeURIComponent(handle)}`;
+        case 'github':    return `https://github.com/${encodeURIComponent(handle)}`;
+        case 'codeberg':  return `https://codeberg.org/${encodeURIComponent(handle)}`;
+        default: return '#';
+    }
+}
+
+function socialIconHtml(social) {
+    if (social.path) {
+        return `<svg viewBox="0 0 ${social.viewBox} ${social.viewBox}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="${social.path}"/></svg>`;
+    }
+    return `<span class="letter-mono">${social.letter}</span>`;
+}
+
+// JS mirror of Rust's `social_field_for_url` in bizbuz — recognises the same
+// 8 platforms so we can round-trip socials in and out of the card's `links`
+// array without losing structure.
+function detectSocialSlug(url) {
+    if (!url) return null;
+    let host = '';
+    try {
+        const u = new URL(url.startsWith('http') ? url : `https://${url}`);
+        host = u.hostname.replace(/^www\./, '').toLowerCase();
+    } catch { return null; }
+    switch (host) {
+        case 'instagram.com': return 'instagram';
+        case 'x.com': case 'twitter.com': return 'x';
+        case 'tiktok.com': return 'tiktok';
+        case 'youtube.com': case 'youtu.be': return 'youtube';
+        case 'facebook.com': case 'fb.com': return 'facebook';
+        case 'linkedin.com': return 'linkedin';
+        case 'github.com': return 'github';
+        case 'codeberg.org': return 'codeberg';
+        default: return null;
+    }
+}
+
+function extractHandleFrom(url, slug) {
+    try {
+        const u = new URL(url.startsWith('http') ? url : `https://${url}`);
+        let path = u.pathname.replace(/^\/+/, '').replace(/\/+$/, '');
+        if (slug === 'linkedin') path = path.replace(/^in\//, '');
+        return decodeURIComponent(path.split('/')[0] || '').replace(/^@/, '');
+    } catch { return ''; }
+}
 
 // ── View / status helpers ────────────────────────────────────────────────────
 
@@ -251,7 +331,6 @@ function renderLinkEntries() {
 
     const atLimit = pendingLinks.length >= MAX_LINKS;
     addLinkBtn.disabled = atLimit;
-    importLinksBtn.disabled = atLimit;
     importBizbuzBtn.disabled = atLimit;
     linkLimitHint.hidden = !atLimit;
 }
@@ -266,43 +345,79 @@ addLinkBtn.addEventListener('click', () => {
     renderLinkEntries();
 });
 
-importLinksBtn.addEventListener('click', async () => {
-    const url = importUrlInput.value.trim();
-    if (!url || pendingLinks.length >= MAX_LINKS) return;
-
-    importLinksBtn.disabled = true;
-    setStatus('Importing links…');
+// URL-import modal: step 2 of the Import flow (chooser → URL prompt → filled
+// edit view). Splits imported links into socials (managed by the icon grid)
+// and non-socials (the flat entries list), then opens the edit view.
+async function performUrlImport(url) {
     try {
         const imported = await core.invoke('import_links', { url });
-
+        let socialsAdded = 0;
+        const nonSocialFresh = [];
+        for (const l of imported) {
+            const slug = detectSocialSlug(l.url);
+            if (slug) {
+                if (!pendingSocials[slug]) {
+                    pendingSocials[slug] = extractHandleFrom(l.url, slug);
+                    socialsAdded++;
+                }
+            } else {
+                nonSocialFresh.push(l);
+            }
+        }
         const existingUrls = new Set(pendingLinks.map((l) => normalizeUrl(l.url)));
-        const fresh = imported.filter((l) => {
+        const dedupedNonSocial = nonSocialFresh.filter((l) => {
             const key = normalizeUrl(l.url);
             if (existingUrls.has(key)) return false;
             existingUrls.add(key);
             return true;
         });
-
         const room = MAX_LINKS - pendingLinks.length;
-        const toAdd = fresh.slice(0, room);
+        const toAdd = dedupedNonSocial.slice(0, room);
         pendingLinks.push(...toAdd.map((l) => ({ id: '', label: l.label, url: l.url })));
+        renderSocialsGrid();
         renderLinkEntries();
-        importUrlInput.value = '';
 
-        if (fresh.length === 0) {
-            setStatus('Those links are already on your card.');
-        } else if (toAdd.length < fresh.length) {
-            setStatus(`Imported ${toAdd.length} of ${fresh.length} new links — the rest were skipped to stay under the ${MAX_LINKS}-link limit.`);
+        const totalAdded = socialsAdded + toAdd.length;
+        if (totalAdded === 0) {
+            setStatus('Nothing new to import from that URL.');
+        } else if (toAdd.length < dedupedNonSocial.length) {
+            setStatus(`Imported ${totalAdded} — some links were skipped to stay under the ${MAX_LINKS}-link limit.`);
         } else {
-            setStatus(`Imported ${toAdd.length} link${toAdd.length === 1 ? '' : 's'}!`);
+            setStatus(`Imported ${totalAdded} item${totalAdded === 1 ? '' : 's'}!`);
         }
+        return true;
     } catch (err) {
         setStatus(`Couldn't import: ${err}`);
-    } finally {
-        // Re-derive from current pendingLinks length (not a hardcoded false) —
-        // a successful import may have just filled the list to MAX_LINKS.
-        importLinksBtn.disabled = pendingLinks.length >= MAX_LINKS;
+        return false;
     }
+}
+
+urlImportSubmitBtn.addEventListener('click', async () => {
+    const url = urlImportInput.value.trim();
+    if (!url) return;
+    urlImportSubmitBtn.disabled = true;
+    setStatus('Importing links…');
+    try {
+        const ok = await performUrlImport(url);
+        if (ok) {
+            urlImportModal.hidden = true;
+            urlImportInput.value = '';
+            showView('edit');
+        }
+    } finally {
+        urlImportSubmitBtn.disabled = false;
+    }
+});
+
+urlImportInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); urlImportSubmitBtn.click(); }
+});
+
+urlImportCancelBtn.addEventListener('click', () => {
+    urlImportModal.hidden = true;
+    urlImportInput.value = '';
+    // Back to the chooser so the user can pick Build instead.
+    chooserModal.hidden = false;
 });
 
 // ── App Group sharing ────────────────────────────────────────────────────────
@@ -326,8 +441,24 @@ importBizbuzBtn.addEventListener('click', async () => {
             setAvatarContent(photoPreview, pendingPhoto, nameEl.value || '');
         }
 
+        // Split imported links into socials (upsert into pendingSocials, no
+        // dedupe against pendingLinks needed since socials live there) and
+        // non-socials (dedupe as before).
+        let socialsAdded = 0;
+        const nonSocialFresh = [];
+        for (const l of result.links) {
+            const slug = detectSocialSlug(l.url);
+            if (slug) {
+                if (!pendingSocials[slug]) {
+                    pendingSocials[slug] = extractHandleFrom(l.url, slug);
+                    socialsAdded++;
+                }
+            } else {
+                nonSocialFresh.push(l);
+            }
+        }
         const existingUrls = new Set(pendingLinks.map((l) => normalizeUrl(l.url)));
-        const fresh = result.links.filter((l) => {
+        const fresh = nonSocialFresh.filter((l) => {
             const key = normalizeUrl(l.url);
             if (existingUrls.has(key)) return false;
             existingUrls.add(key);
@@ -336,10 +467,12 @@ importBizbuzBtn.addEventListener('click', async () => {
         const room = MAX_LINKS - pendingLinks.length;
         const toAdd = fresh.slice(0, room);
         pendingLinks.push(...toAdd.map((l) => ({ id: '', label: l.label, url: l.url })));
+        renderSocialsGrid();
         renderLinkEntries();
 
         const notes = [];
-        if (toAdd.length) notes.push(`Imported ${toAdd.length} link${toAdd.length === 1 ? '' : 's'} from BizBuz`);
+        const total = toAdd.length + socialsAdded;
+        if (total) notes.push(`Imported ${total} item${total === 1 ? '' : 's'} from BizBuz`);
         if (result.skippedFields.length) notes.push(`${result.skippedFields.length} field${result.skippedFields.length === 1 ? '' : 's'} couldn't be imported (${result.skippedFields.join(', ')} — no equivalent here)`);
         setStatus(notes.length ? notes.join(' — ') : 'Nothing new to import from BizBuz.');
     } catch (err) {
@@ -352,25 +485,131 @@ importBizbuzBtn.addEventListener('click', async () => {
 // ── Form <-> LinkCard ─────────────────────────────────────────────────────────
 
 function cardFromForm() {
+    // Merge socials from the icon grid into the links array so the whole
+    // set round-trips through the same Rust `LinkCard` shape. Socials come
+    // first for stable ordering — they render as branded icons on the
+    // published SVG anyway.
+    const socialLinks = [];
+    for (const s of SOCIALS) {
+        const handle = pendingSocials[s.slug];
+        if (handle && handle.trim()) {
+            socialLinks.push({ id: '', label: s.label, url: socialUrlFor(s.slug, handle.trim()) });
+        }
+    }
     return {
         id: activeCard?.id || '',
         name: document.getElementById('field-name').value.trim() || undefined,
         bio: document.getElementById('field-bio').value.trim() || undefined,
-        category: document.getElementById('field-category').value || undefined,
         photo: pendingPhoto || undefined,
-        links: pendingLinks,
+        links: [...socialLinks, ...pendingLinks],
     };
 }
 
 function fillForm(source) {
     document.getElementById('field-name').value = source?.name || '';
     document.getElementById('field-bio').value = source?.bio || '';
-    document.getElementById('field-category').value = source?.category || '';
     pendingPhoto = source?.photo || null;
-    pendingLinks = (source?.links || []).map((l) => ({ ...l }));
+
+    // Separate stored links into socials (managed by the icon grid) and
+    // free-form links (managed by the entries list). The first matching
+    // handle per slug wins; subsequent duplicates stay in the flat list.
+    pendingSocials = {};
+    pendingLinks = [];
+    for (const l of source?.links || []) {
+        const slug = detectSocialSlug(l.url);
+        if (slug && !pendingSocials[slug]) {
+            pendingSocials[slug] = extractHandleFrom(l.url, slug);
+        } else {
+            pendingLinks.push({ ...l });
+        }
+    }
+
     editingLinkIndex = null;
+    expandedSocial = null;
     setAvatarContent(photoPreview, source?.photo, source?.name || '');
+    renderSocialsGrid();
     renderLinkEntries();
+}
+
+// ── Socials grid + disclosure (Edit view) ────────────────────────────────
+
+function renderSocialsGrid() {
+    // Clear any prior disclosure — it lives as a sibling inserted after the
+    // grid, so a fresh render needs to remove the stale one first.
+    const staleDisclosure = document.getElementById('social-disclosure');
+    if (staleDisclosure) staleDisclosure.remove();
+
+    socialsGrid.innerHTML = '';
+    for (const social of SOCIALS) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'social-icon-btn';
+        if (pendingSocials[social.slug]) btn.classList.add('filled');
+        if (expandedSocial === social.slug) btn.classList.add('expanded');
+        btn.title = social.label;
+        btn.setAttribute('aria-label', social.label);
+        btn.innerHTML = socialIconHtml(social);
+        btn.addEventListener('click', () => {
+            expandedSocial = expandedSocial === social.slug ? null : social.slug;
+            renderSocialsGrid();
+        });
+        socialsGrid.appendChild(btn);
+    }
+    if (expandedSocial) renderSocialDisclosure();
+}
+
+function renderSocialDisclosure() {
+    const social = SOCIALS.find((s) => s.slug === expandedSocial);
+    if (!social) return;
+
+    const box = document.createElement('div');
+    box.className = 'social-disclosure';
+    box.id = 'social-disclosure';
+
+    const title = document.createElement('span');
+    title.className = 'social-disclosure-title';
+    title.textContent = `${social.label} username`;
+    box.appendChild(title);
+
+    const body = document.createElement('div');
+    body.className = 'social-disclosure-body';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = 'username';
+    input.autocapitalize = 'none';
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    input.value = pendingSocials[social.slug] || '';
+    const commit = () => {
+        const cleaned = input.value.trim().replace(/^@/, '');
+        if (cleaned) pendingSocials[social.slug] = cleaned;
+        else delete pendingSocials[social.slug];
+        // Live-toggle the icon's filled state without a full re-render (would
+        // steal focus from the input).
+        const btn = socialsGrid.children[SOCIALS.indexOf(social)];
+        btn.classList.toggle('filled', !!pendingSocials[social.slug]);
+    };
+    input.addEventListener('input', commit);
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); doneBtn.click(); }
+    });
+
+    const doneBtn = document.createElement('button');
+    doneBtn.type = 'button';
+    doneBtn.className = 'btn btn-secondary';
+    doneBtn.textContent = 'Done';
+    doneBtn.addEventListener('click', () => {
+        commit();
+        expandedSocial = null;
+        renderSocialsGrid();
+    });
+
+    body.append(input, doneBtn);
+    box.appendChild(body);
+
+    socialsGrid.after(box);
+    input.focus();
 }
 
 // ── Cards grid ────────────────────────────────────────────────────────────────
@@ -392,6 +631,16 @@ function renderCardsGrid() {
         name.className = 'card-tile-name';
         name.textContent = c.name || 'Untitled';
         tile.appendChild(name);
+
+        // Only one card can be in the App Group at a time, so at most one
+        // tile ever carries this badge.
+        if (c.id === sharedCardId) {
+            const badge = document.createElement('span');
+            badge.className = 'card-tile-badge';
+            badge.textContent = 'Shared';
+            badge.title = 'Other apps import this card';
+            tile.appendChild(badge);
+        }
 
         tile.addEventListener('click', () => openCard(c));
         cardsGrid.appendChild(tile);
@@ -444,14 +693,31 @@ function renderCardView(c) {
     bioEl.textContent = c.bio ? `"${c.bio}"` : '';
     bioEl.hidden = !c.bio;
 
-    const categoryEl = document.getElementById('card-category');
-    categoryEl.textContent = categoryLabels[c.category] || '';
-    categoryEl.hidden = !c.category;
-
+    // Split the stored links into socials (rendered as branded icons above
+    // the flat list) and non-social entries (the traditional row list).
+    cardSocialsEl.innerHTML = '';
     const linksEl = document.getElementById('card-links');
     linksEl.innerHTML = '';
+    const seenSocials = new Set();
     for (const entry of c.links || []) {
         if (!entry.url) continue;
+        const slug = detectSocialSlug(entry.url);
+        if (slug && !seenSocials.has(slug)) {
+            seenSocials.add(slug);
+            const social = SOCIALS.find((s) => s.slug === slug);
+            const a = document.createElement('a');
+            a.className = 'card-social-link';
+            a.href = normalizeUrl(entry.url);
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            a.style.color = social.hex;
+            const handle = extractHandleFrom(entry.url, slug);
+            a.title = handle ? `${social.label} — @${handle}` : social.label;
+            a.setAttribute('aria-label', a.title);
+            a.innerHTML = socialIconHtml(social);
+            cardSocialsEl.appendChild(a);
+            continue;
+        }
         const href = normalizeUrl(entry.url);
         const a = document.createElement('a');
         a.className = 'link-list-item';
@@ -507,91 +773,103 @@ function backgroundPublishAllCards() {
     for (const c of cards) backgroundPublishCard(c.id);
 }
 
-// Keeps BizBuz's "Import from Linkitylink" button in sync with whichever
-// card was most recently saved — the App Group only has room for one
-// Linkitylink card, so there's no explicit "Share to App Group" button
-// anymore, just an automatic sync on every save.
-async function backgroundShareToAppGroup(cardId) {
+// ── App Group sharing ────────────────────────────────────────────────────────
+//
+// The App Group holds one Linkitylink card, which is what BizBuz's "Import
+// from Linkitylink" reads. Which card that is, is the user's explicit
+// choice — sharing only ever happens on a button tap, and the card list
+// badges whichever card is currently shared so the choice stays visible.
+
+async function refreshSharedCardId() {
     try {
-        await core.invoke('share_card_to_app_group', { cardId });
+        sharedCardId = await core.invoke('get_shared_card_id');
     } catch {
-        // Best-effort — shouldn't surface to the user for a sync they
-        // didn't explicitly ask for.
+        // Treated as "nothing shared" — the badge and hint just stay off
+        // rather than blocking the card list on an App Group read.
+        sharedCardId = null;
     }
 }
+
+function renderShareState(c) {
+    const isShared = !!c && c.id === sharedCardId;
+    shareAppGroupBtn.textContent = isShared ? 'Update Shared Copy' : 'Share to Other Apps';
+    if (isShared) {
+        shareAppGroupHint.textContent = 'Other apps import this card. Tap to push your latest edits.';
+    } else if (sharedCardId) {
+        shareAppGroupHint.textContent = 'Another card is shared right now — this will replace it.';
+    } else {
+        shareAppGroupHint.textContent = 'Let BizBuz and your other apps import this card.';
+    }
+}
+
+shareAppGroupBtn.addEventListener('click', async () => {
+    if (!activeCard) return;
+    shareAppGroupBtn.disabled = true;
+    try {
+        await core.invoke('share_card_to_app_group', { cardId: activeCard.id });
+        sharedCardId = activeCard.id;
+        renderShareState(activeCard);
+        renderCardsGrid();
+        setStatus('Shared — BizBuz can now import this card.');
+    } catch (err) {
+        setStatus(`Couldn't share: ${err}`);
+    } finally {
+        shareAppGroupBtn.disabled = false;
+    }
+});
 
 function openCard(c) {
     activeCard = c;
     renderCardView(c);
     renderPublishLink(c);
+    renderShareState(c);
     showView('card');
 }
 
+// Sets up the edit view for a fresh card and shows the chooser modal on top
+// so the user picks Import-from-URL vs. Build-from-scratch first.
 function openNewCardForm() {
     activeCard = null;
     pendingPhoto = null;
     pendingLinks = [];
+    pendingSocials = {};
+    expandedSocial = null;
     editingLinkIndex = null;
     disarmDelete();
     form.reset();
     setAvatarContent(photoPreview, null, '');
+    renderSocialsGrid();
     renderLinkEntries();
     cancelEditBtn.hidden = cards.length === 0;
     deleteCardBtn.hidden = true;
-    showView('edit');
+    chooserModal.hidden = false;
 }
+
+chooserImportBtn.addEventListener('click', () => {
+    chooserModal.hidden = true;
+    urlImportModal.hidden = false;
+    // Small delay so iOS actually focuses the input (right after a
+    // hidden→visible transition, focus() sometimes gets swallowed).
+    setTimeout(() => urlImportInput.focus(), 50);
+});
+
+chooserBuildBtn.addEventListener('click', () => {
+    chooserModal.hidden = true;
+    showView('edit');
+});
+
+chooserCancelBtn.addEventListener('click', () => {
+    chooserModal.hidden = true;
+    // If the user cancels the chooser and had no cards to begin with, drop
+    // them on the (empty) cards grid so they can tap "+" to retry.
+    if (cards.length === 0) showView('cards');
+});
 
 async function loadCards() {
     cards = await core.invoke('load_cards');
-    if (cards.length === 0) {
-        openNewCardForm();
-    } else {
-        renderCardsGrid();
-        showView('cards');
-    }
-}
-
-function getLetemcookPromptedIds() {
-    try {
-        return new Set(JSON.parse(localStorage.getItem(LETEMCOOK_PROMPTED_KEY) || '[]'));
-    } catch {
-        return new Set();
-    }
-}
-
-function markLetemcookPrompted(cardId) {
-    const ids = getLetemcookPromptedIds();
-    ids.add(cardId);
-    try {
-        localStorage.setItem(LETEMCOOK_PROMPTED_KEY, JSON.stringify([...ids]));
-    } catch {
-        // localStorage unavailable — worst case this prompt reappears later.
-    }
-}
-
-// Offers to cross-list a freshly-saved Food & Drink card on letemcook, a
-// sibling food-ordering app. Fires at most once ever per card id.
-async function maybePromptLetemcook(saved) {
-    if (!saved.category || !FOOD_CATEGORY_SLUGS.includes(saved.category)) return;
-    if (getLetemcookPromptedIds().has(saved.id)) return;
-    markLetemcookPrompted(saved.id);
-
-    const wantsToJoin = confirm(
-        `Also list "${saved.name || 'this business'}" on letemcook, our food-ordering app?`
-    );
-    if (!wantsToJoin) return;
-
-    const params = new URLSearchParams();
-    if (saved.name) params.set('name', saved.name);
-    if (saved.bio) params.set('bio', saved.bio);
-
-    try {
-        await core.invoke('plugin:shell|open', {
-            path: `letemcook://add-location?${params.toString()}`,
-        });
-    } catch (err) {
-        setStatus(`Couldn't open letemcook: ${err}`);
-    }
+    renderCardsGrid();
+    showView('cards');
+    if (cards.length === 0) openNewCardForm();
 }
 
 form.addEventListener('submit', async (e) => {
@@ -604,10 +882,9 @@ form.addEventListener('submit', async (e) => {
         renderCardsGrid();
         renderCardView(saved);
         renderPublishLink(saved);
+        renderShareState(saved);
         showView('card');
         backgroundPublishCard(saved.id);
-        backgroundShareToAppGroup(saved.id);
-        maybePromptLetemcook(saved);
     } catch (err) {
         setStatus(`Couldn't save: ${err}`);
     }
@@ -635,17 +912,20 @@ deleteCardBtn.addEventListener('click', async () => {
 
     disarmDelete();
     try {
+        setStatus('Deleting…');
         await core.invoke('delete_card', { id: activeCard.id });
         cards = cards.filter((c) => c.id !== activeCard.id);
+        // delete_card stops sharing a card it just deleted, so drop the
+        // badge here to match rather than leaving it on a gone card.
+        if (sharedCardId === activeCard.id) sharedCardId = null;
         activeCard = null;
-        if (cards.length === 0) {
-            openNewCardForm();
-        } else {
-            renderCardsGrid();
-            showView('cards');
-        }
+        renderCardsGrid();
+        showView('cards');
+        if (cards.length === 0) openNewCardForm();
     } catch (err) {
-        setStatus(`Couldn't delete: ${err}`);
+        // Rust returns a complete sentence here (it explains nothing was lost
+        // locally and the delete can be retried), so pass it through.
+        setStatus(`${err}`);
     }
 });
 
@@ -697,6 +977,52 @@ shareBtn.addEventListener('click', async () => {
         setStatus(`Couldn't share: ${err}`);
     } finally {
         shareBtn.disabled = false;
+    }
+});
+
+// ── Delete all data ──────────────────────────────────────────────────────────
+//
+// Two-tap confirm, same UX as delete-card. Unpublishes every card and the
+// referral record before clearing anything locally, so it needs a connection —
+// Rust refuses rather than orphaning published records it could no longer
+// reach. Does not touch the App-Group canonical profile, which is shared with
+// the sibling apps.
+let resetArmed = false;
+let resetArmedTimeout = null;
+
+function disarmReset() {
+    resetArmed = false;
+    resetAllBtn.textContent = 'Delete All My Data';
+    if (resetArmedTimeout) {
+        clearTimeout(resetArmedTimeout);
+        resetArmedTimeout = null;
+    }
+}
+
+resetAllBtn.addEventListener('click', async () => {
+    if (!resetArmed) {
+        resetArmed = true;
+        resetAllBtn.textContent = 'Tap again to confirm';
+        resetArmedTimeout = setTimeout(disarmReset, 3000);
+        return;
+    }
+    disarmReset();
+    resetAllBtn.disabled = true;
+    setStatus('Deleting your published cards…');
+    try {
+        await core.invoke('reset_all_data');
+        cards = [];
+        activeCard = null;
+        sharedCardId = null;
+        cards = await core.invoke('load_cards');
+        renderCardsGrid();
+        showView('cards');
+        if (cards.length === 0) openNewCardForm();
+        setStatus('Deleted — nothing of yours is published any more.');
+    } catch (err) {
+        setStatus(`${err}`);
+    } finally {
+        resetAllBtn.disabled = false;
     }
 });
 
@@ -951,24 +1277,10 @@ profileForm.addEventListener('submit', async (e) => {
 
 profileCloseBtn.addEventListener('click', () => showView(preProfileView));
 
-function populateCategorySelect() {
-    const select = document.getElementById('field-category');
-    for (const c of categories) {
-        const opt = document.createElement('option');
-        opt.value = c.slug;
-        opt.textContent = c.label;
-        select.appendChild(opt);
-    }
-}
-
 async function init() {
-    try {
-        categories = await core.invoke('get_categories');
-    } catch {
-        categories = [];
-    }
-    categoryLabels = Object.fromEntries(categories.map((c) => [c.slug, c.label]));
-    populateCategorySelect();
+    // Before loadCards, which renders the grid — the "Shared" badge needs
+    // sharedCardId to already be populated on that first paint.
+    await refreshSharedCardId();
     await loadCards();
     backgroundPublishAllCards();
 }

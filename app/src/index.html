@@ -8,8 +8,10 @@
 </head>
 <body>
     <main id="app">
-        <button type="button" class="profile-nav-btn" id="profile-nav-btn">Profile</button>
-        <button type="button" class="back-nav-btn" id="back-to-cards-btn" hidden>◀ My Cards</button>
+        <header class="app-header">
+            <button type="button" class="back-nav-btn" id="back-to-cards-btn" hidden>◀ My Cards</button>
+            <button type="button" class="profile-nav-btn" id="profile-nav-btn">Profile</button>
+        </header>
 
         <!-- My Link Cards view -->
         <section id="cards-view" class="view" hidden>
@@ -24,58 +26,55 @@
                 <p class="referral-label">Invite friends to Linkitylink</p>
                 <button type="button" class="btn btn-secondary" id="referral-share-btn">Share Linkitylink</button>
             </section>
+
+            <!-- The in-app data deletion App Store Review Guideline 5.1.1(v)
+                 requires. Unpublishes the remote copies rather than only
+                 clearing local state, so it's labelled for a user. -->
+            <section class="referral-section">
+                <p class="referral-label">Delete everything — your cards, and the published copies anyone with a link can see</p>
+                <button type="button" class="btn btn-danger" id="reset-all-btn">Delete All My Data</button>
+            </section>
         </section>
 
         <!-- Edit view -->
         <section id="edit-view" class="view" hidden>
-            <div class="view-scroll">
-                <header class="view-header">
-                    <h1>Link Card</h1>
-                    <p class="subtitle">This stays on your device — nothing is uploaded until you publish.</p>
-                </header>
+            <header class="view-header">
+                <h1>Link Card</h1>
+                <p class="subtitle">This stays on your device — nothing is uploaded until you publish.</p>
+            </header>
 
-                <form id="card-form">
-                    <div class="avatar avatar-editable" id="photo-preview"></div>
-                    <button type="button" class="btn btn-secondary" id="choose-photo-btn">Choose Photo</button>
+            <form id="card-form">
+                <button type="button" class="btn btn-secondary" id="import-bizbuz-btn">Import from BizBuz</button>
 
-                    <label>Name
-                        <input type="text" id="field-name" placeholder="Ada Lovelace">
-                    </label>
-                    <label>Bio
-                        <textarea id="field-bio" rows="2" placeholder="A short bio"></textarea>
-                    </label>
-                    <label>Category
-                        <select id="field-category">
-                            <option value="">None</option>
-                        </select>
-                    </label>
+                <div class="avatar avatar-editable" id="photo-preview"></div>
+                <button type="button" class="btn btn-secondary" id="choose-photo-btn">Choose Photo</button>
 
-                    <p class="section-label">Links</p>
+                <label>Name
+                    <input type="text" id="field-name" placeholder="Ada Lovelace">
+                </label>
+                <label>Bio
+                    <textarea id="field-bio" rows="2" placeholder="A short bio"></textarea>
+                </label>
 
-                    <div class="link-entry-form" id="link-import-form">
-                        <input type="text" id="import-url" placeholder="Paste a Linktree, lnk.bio, etc. URL">
-                        <button type="button" class="btn btn-secondary" id="import-links-btn">Import</button>
-                    </div>
-                    <button type="button" class="btn btn-secondary" id="import-bizbuz-btn">Import from BizBuz</button>
+                <p class="section-label">Socials</p>
+                <div class="socials-grid" id="socials-grid"></div>
 
-                    <ul class="link-entries" id="link-entries"></ul>
+                <p class="section-label">Links</p>
+                <ul class="link-entries" id="link-entries"></ul>
 
-                    <div class="link-entry-form">
-                        <input type="text" id="new-link-label" placeholder="Label (e.g. Portfolio)" maxlength="40">
-                        <input type="text" id="new-link-url" placeholder="URL">
-                        <button type="button" class="btn btn-secondary" id="add-link-btn">Add Link</button>
-                    </div>
-                    <p class="hint hint-warning" id="link-limit-hint" hidden>Up to 16 links — remove one to add another.</p>
-                </form>
-            </div>
+                <div class="link-entry-form">
+                    <input type="text" id="new-link-label" placeholder="Label (e.g. Portfolio)" maxlength="40">
+                    <input type="text" id="new-link-url" placeholder="URL">
+                    <button type="button" class="btn btn-secondary" id="add-link-btn">Add Link</button>
+                </div>
+                <p class="hint hint-warning" id="link-limit-hint" hidden>Up to 16 links — remove one to add another.</p>
 
-            <div class="view-footer">
                 <div class="form-actions">
-                    <button type="submit" form="card-form" class="btn btn-primary">Save</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
                     <button type="button" class="btn btn-secondary" id="cancel-edit-btn" hidden>Cancel</button>
                 </div>
                 <button type="button" class="btn btn-danger" id="delete-card-btn" hidden>Delete Card</button>
-            </div>
+            </form>
         </section>
 
         <!-- Card view -->
@@ -84,8 +83,8 @@
                 <div class="avatar" id="card-avatar"></div>
                 <h1 class="card-name" id="card-name"></h1>
                 <p class="card-bio" id="card-bio"></p>
-                <p class="hint" id="card-category" hidden></p>
 
+                <div class="card-socials" id="card-socials"></div>
                 <div class="link-list" id="card-links"></div>
 
                 <button type="button" class="btn btn-secondary" id="edit-btn">Edit</button>
@@ -95,6 +94,15 @@
                     <button type="button" class="btn btn-secondary btn-copy" id="copy-link-btn">Copy</button>
                 </div>
                 <button type="button" class="btn btn-primary" id="share-btn">Share</button>
+
+                <!-- App Group sharing — the one card sibling apps (BizBuz's
+                     "Import from Linkitylink") can read. Explicitly chosen
+                     here rather than synced automatically on save, since the
+                     App Group only has room for one card. -->
+                <div class="app-group-share">
+                    <button type="button" class="btn btn-secondary" id="share-app-group-btn">Share to Other Apps</button>
+                    <p class="hint" id="share-app-group-hint"></p>
+                </div>
             </div>
         </section>
 
@@ -130,6 +138,33 @@
         </section>
 
         <p class="status-msg" id="status-msg"></p>
+
+        <!-- New-card chooser modal — asks how to start a new link card
+             (Import a URL vs. Build from scratch). Shown on top of whichever
+             view is underneath (cards or empty state on first launch). -->
+        <div id="new-card-chooser" class="modal" hidden>
+            <div class="modal-panel">
+                <button type="button" class="modal-close" id="chooser-cancel-btn" aria-label="Cancel">×</button>
+                <h2>New Link Card</h2>
+                <p>How would you like to start?</p>
+                <button type="button" class="btn btn-primary" id="chooser-import-btn">Import from a URL</button>
+                <button type="button" class="btn btn-secondary" id="chooser-build-btn">Build from scratch</button>
+            </div>
+        </div>
+
+        <!-- URL-import modal — second step of the Import flow: the user
+             pastes a Linktree/lnk.bio URL here; on success we scrape the
+             links and open the edit view with them pre-filled. -->
+        <div id="url-import-modal" class="modal" hidden>
+            <div class="modal-panel">
+                <button type="button" class="modal-close" id="url-import-cancel-btn" aria-label="Cancel">×</button>
+                <h2>Import from a URL</h2>
+                <p>Paste a Linktree, lnk.bio, or similar link-in-bio URL.</p>
+                <input type="url" id="url-import-input" placeholder="https://linktr.ee/…"
+                       autocapitalize="none" autocomplete="off" spellcheck="false" inputmode="url">
+                <button type="button" class="btn btn-primary" id="url-import-submit-btn">Import</button>
+            </div>
+        </div>
     </main>
     <script type="module" src="main.js"></script>
 </body>

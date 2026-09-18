@@ -211,6 +211,53 @@ fn sessionless_from_hex(priv_key_hex: &str) -> Result<Sessionless, String> {
     Ok(Sessionless::from_private_key(secret_key))
 }
 
+/// This key's BDO identity if it already has one, without creating it.
+///
+/// Deletion must never mint a keypair: a card that was never published has no
+/// remote record, and creating a key to "delete" one would be pointless churn.
+fn existing_bdo_sessionless(app: &tauri::AppHandle, key: &str) -> Option<Sessionless> {
+    read_bdo_keys(app)
+        .get(key)
+        .and_then(|k| sessionless_from_hex(&k.private_key_hex).ok())
+}
+
+/// Unpublishes every remote record a key has, across every base it published
+/// to, and reports which bases failed.
+///
+/// An empty return means the remote is clean and local state is safe to drop.
+/// Callers must not delete locally while it is non-empty: `bdo_uuid_by_env`
+/// and the keypair are the only route back to those records, so discarding
+/// them leaves the user's name, photo and links published with no way for
+/// anyone — including us — to take them down.
+async fn unpublish_everywhere(
+    app: &tauri::AppHandle,
+    key: &str,
+    hash: &str,
+    uuids_by_env: &HashMap<String, String>,
+) -> Vec<String> {
+    if existing_bdo_sessionless(app, key).is_none() {
+        return Vec::new();
+    }
+
+    let mut failed = Vec::new();
+    for (env_key, uuid) in uuids_by_env {
+        // Sessionless isn't Clone and BDO::new takes ownership, so rebuild it
+        // per base rather than holding one across the loop.
+        let Some(sessionless) = existing_bdo_sessionless(app, key) else {
+            failed.push(env_key.clone());
+            continue;
+        };
+        // env keys are hostnames with dots swapped for dashes, so this reaches
+        // the base that actually holds the record.
+        let host = env_key.replace('-', ".");
+        let client = BDO::new(Some(format!("https://{host}/bdo/")), Some(sessionless));
+        if client.delete_user(uuid, hash).await.is_err() {
+            failed.push(env_key.clone());
+        }
+    }
+    failed
+}
+
 /// Returns a card's BDO identity, generating and persisting a fresh keypair
 /// the first time a given card is published.
 fn load_or_create_bdo_sessionless(app: &tauri::AppHandle, key: &str) -> Result<Sessionless, String> {
@@ -784,9 +831,38 @@ async fn save_card(app: tauri::AppHandle, mut card: LinkCard) -> Result<LinkCard
 
 #[tauri::command]
 async fn delete_card(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    // Remote first, and local state is kept if it fails. Deleting locally on a
+    // failed unpublish would discard the uuid and keypair that are the only
+    // route back to the published record, leaving it public permanently. A
+    // retryable error beats a permanent orphan; the cost is that deleting a
+    // published card needs a connection.
+    {
+        let store = read_cards(&app)?;
+        let card = store
+            .cards
+            .iter()
+            .find(|c| c.id == id)
+            .ok_or_else(|| "Card not found".to_string())?;
+        let failed = unpublish_everywhere(&app, &id, BDO_HASH, &card.bdo_uuid_by_env).await;
+        if !failed.is_empty() {
+            return Err(format!(
+                "Couldn't remove the published copy of this card from {}. \
+                 It's still here, so nothing was lost — check your connection and try again.",
+                failed.join(", ")
+            ));
+        }
+    }
+
     let mut store = read_cards(&app)?;
     store.cards.retain(|c| c.id != id);
     write_cards(&app, &store)?;
+
+    // The keypair's only purpose was signing for a record that no longer
+    // exists; keeping it would leave a usable credential behind.
+    let mut keys = read_bdo_keys(&app);
+    if keys.remove(&id).is_some() {
+        write_bdo_keys(&app, &keys)?;
+    }
 
     // If this was the card shared with sibling apps, stop sharing it —
     // otherwise BizBuz keeps importing a card that no longer exists here,
@@ -1035,6 +1111,66 @@ async fn import_links(url: String) -> Result<Vec<LinkEntry>, String> {
         ));
     }
     Ok(entries)
+}
+
+// ── Testing / data deletion ─────────────────────────────────────────────────
+//
+// Wipes every local file that carries "who this device is" AND unpublishes
+// everything first, so the next launch is indistinguishable from a fresh
+// install and nothing the user published is left readable.
+//
+// Deliberately does NOT touch the App-Group-shared canonical profile
+// (`canonical.profile`) — that record is owned jointly with BizBuz and the
+// other sibling apps, and wiping it here would silently reset those too. The
+// `linkitylink.card` handoff key IS cleared, since that's this app's own.
+#[tauri::command]
+async fn reset_all_data(app: tauri::AppHandle) -> Result<(), String> {
+    // Unpublish before deleting anything local, for the same reason
+    // delete_card does: the files below are the only record of what was
+    // published and the only keys that can authorise its removal.
+    let mut failed: Vec<String> = Vec::new();
+
+    for card in read_cards(&app)?.cards {
+        for env_key in unpublish_everywhere(&app, &card.id, BDO_HASH, &card.bdo_uuid_by_env).await {
+            let label = card.name.clone().unwrap_or_else(|| "card".into());
+            failed.push(format!("{label} ({env_key})"));
+        }
+    }
+
+    let referral_uuids: HashMap<String, String> = read_referral_links(&app)
+        .into_iter()
+        .map(|(env_key, link)| (env_key, link.uuid))
+        .collect();
+    for env_key in unpublish_everywhere(&app, "referral", REFERRAL_HASH, &referral_uuids).await {
+        failed.push(format!("referral link ({env_key})"));
+    }
+
+    if !failed.is_empty() {
+        return Err(format!(
+            "Couldn't remove published copies of: {}. Nothing was deleted locally, \
+             so you can try again — check your connection first.",
+            failed.join(", ")
+        ));
+    }
+
+    let paths = [
+        cards_path(&app)?,
+        bdo_keys_path(&app)?,
+        referral_path(&app)?,
+        legacy_card_path(&app)?,
+    ];
+    for path in paths {
+        match fs::remove_file(&path) {
+            Ok(_) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(format!("Failed to remove {}: {}", path.display(), err)),
+        }
+    }
+
+    // This app's own handoff key, so BizBuz stops importing a card that's gone.
+    clear_shared_card(&app)?;
+
+    Ok(())
 }
 
 // ── App Group sharing ───────────────────────────────────────────────────────
@@ -1320,6 +1456,7 @@ pub fn run() {
             get_or_create_referral_link,
             share_card_to_app_group,
             get_shared_card_id,
+            reset_all_data,
             import_from_bizbuz,
             load_canonical_profile,
             save_canonical_profile
