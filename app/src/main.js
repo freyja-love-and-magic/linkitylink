@@ -255,9 +255,22 @@ function renderLinkEntries() {
             urlInput.placeholder = 'URL';
             urlInput.value = entry.url;
 
-            const commit = () => {
+            // Write through on every keystroke, so pendingLinks always matches
+            // what's on screen. Edits used to land only on Enter or the ✓
+            // button — tapping a row, fixing the URL and then tapping Save
+            // (the obvious thing to do) never ran that commit, so Save
+            // republished the old URL and the edit silently vanished. The
+            // socials disclosure above already worked this way.
+            const writeThrough = () => {
                 entry.label = labelInput.value.trim();
                 entry.url = urlInput.value.trim();
+            };
+            labelInput.addEventListener('input', writeThrough);
+            urlInput.addEventListener('input', writeThrough);
+
+            // Enter and ✓ now only close the editor; the data is already in.
+            const commit = () => {
+                writeThrough();
                 editingLinkIndex = null;
                 renderLinkEntries();
             };
