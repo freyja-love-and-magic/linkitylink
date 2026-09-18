@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Linkitylink app icon — two chain links.
+       HomeVentory palette: midnight slate ground (#1F2933, same as the sibling
+       apps so the family reads as a set), glacier white and signal blue links.
+
+       A chain rather than a stack of list rows: at 40px a list of bars turns
+       to mush, while two overlapping ovals stay legible as a shape. It says
+       "link" without needing a letterform to explain it.
+
+       The two links overlap by about one stroke width so their end caps
+       interlace. An earlier version overlapped far more and redrew the white
+       link's arc on top to fake a threaded interlock — that put the white cap
+       entirely inside the blue ring and read as an artifact, not a chain.
+       Simple over/under at a modest overlap is cleaner and survives
+       downsampling better.
+
+       Regenerate the PNG sets with scripts/make-icons.sh. -->
+  <rect width="1024" height="1024" fill="#1F2933"/>
+
+  <!-- Grouped so the mark can be scaled and optically centred at once, and
+       rotated as a pair so the chain runs diagonally — which fills a square
+       canvas better than a horizontal one would. -->
+  <g transform="translate(512 512) rotate(-30) scale(1.32) translate(-512 -512)">
+    <!-- Back link, upper-left -->
+    <rect x="276" y="428" width="300" height="168" rx="84"
+          fill="none" stroke="#F7F9FA" stroke-width="56"/>
+    <!-- Front link, lower-right, overlapping by ~64px — a shade more than the
+         56px stroke, so the caps clearly interlace without one swallowing the
+         other. -->
+    <rect x="512" y="428" width="300" height="168" rx="84"
+          fill="none" stroke="#4FA3F7" stroke-width="56"/>
+  </g>
+</svg>
